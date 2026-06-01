@@ -16,7 +16,11 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from custom_components.remeha_modbus.api import DeviceInstance
 from custom_components.remeha_modbus.const import (
     DOMAIN,
+    REMEHA_SEASON_MODE_TEXT,#hinzugefügt
     REMEHA_SENSORS,
+    REMEHA_STATUS_TEXT,#hinzugefügt
+    REMEHA_SUBSTATUS_TEXT,#hinzugefügt
+    MetaRegisters,#hinzugefügt
     ModbusVariableDescription,
 )
 from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
@@ -78,13 +82,34 @@ class RemehaSensorEntity(CoordinatorEntity[RemehaUpdateCoordinator], SensorEntit
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
 
+#geändert Anfang
     @property
     def native_value(self):
         """Return the value of this sensor."""
-
-        return cast(RemehaUpdateCoordinator, self.coordinator).get_sensor_value(
+        value = cast(RemehaUpdateCoordinator, self.coordinator).get_sensor_value(
             variable=self._variable
         )
+
+        if value is None:
+            return None
+
+        if self._variable == MetaRegisters.SEASON_MODE_TEXT:
+            return REMEHA_SEASON_MODE_TEXT.get(
+                int(value), f"Unbekannt ({value})"
+            )
+
+        if self._variable == MetaRegisters.STATUS_TEXT:
+            return REMEHA_STATUS_TEXT.get(
+                int(value), f"Unbekannt ({value})"
+            )
+
+        if self._variable == MetaRegisters.SUBSTATUS_TEXT:
+            return REMEHA_SUBSTATUS_TEXT.get(
+                int(value), f"Unbekannt ({value})"
+            )
+
+        return value
+#geändert Ende
 
     @property
     def device_info(self) -> DeviceInfo | None:
