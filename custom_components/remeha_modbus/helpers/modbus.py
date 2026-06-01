@@ -38,8 +38,34 @@ type ModbusPrimitive = int | float | str | list[bool] | list[int] | list[float]
 
 
 def _is_gtw08_null_value(variable: ModbusVariableDescription, val: ModbusPrimitive | bytes) -> bool:
+    """Return True if the value represents a GTW-08 null / unavailable value."""
+
+    if val is None:
+        return True
+
+    # Generic null values from the GTW-08 documentation / observed systems.
+    if variable.data_type == DataType.UINT8 and val in (0xFF,):
+        return True
+
+    if variable.data_type == DataType.UINT16 and val in (0xFFFF,):
+        return True
+
+    if variable.data_type == DataType.UINT32 and val in (0xFFFFFFFF,):
+        return True
+
+    # Some devices expose unavailable signed temperatures as INT16 minimum.
+    # With scale 0.1 this appears in HA as -3276.8 °C.
+    if variable.data_type == DataType.INT16 and val in (-32768,):
+        return True
+
+    if variable.data_type == DataType.INT32 and val in (-2147483648,):
+        return True
+
+    # Keep the integration's existing explicit null table as fallback.
     return (
-        val == NULL_VALUES[variable.data_type] if variable.data_type in NULL_VALUES else val is None
+        val == NULL_VALUES[variable.data_type]
+        if variable.data_type in NULL_VALUES
+        else False
     )
 
 
