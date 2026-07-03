@@ -38,6 +38,11 @@ async def async_setup_entry(
     mainboards: list[DeviceInstance] = coordinator.get_devices(lambda device: device.is_mainboard())
     if mainboards:
         entities.append(
+            RemehaSummerWinterNumber(
+                api=api, coordinator=coordinator, parent_device_id=mainboards[0].id
+            )
+        )
+        entities.append(
             RemehaTransitionSeasonNumber(
                 api=api, coordinator=coordinator, parent_device_id=mainboards[0].id
             )
@@ -127,6 +132,46 @@ class DhwHysteresisEntity(CoordinatorEntity[RemehaUpdateCoordinator], NumberEnti
             if device_instance is not None
             else None
         )
+
+
+class RemehaSummerWinterNumber(RemehaApplianceEntity, NumberEntity):
+    """Number entity for the summer/winter outdoor temperature threshold (parameter AP073).
+
+    Above this outside temperature the appliance switches to summer mode and stops heating.
+    """
+
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
+    _attr_native_min_value = 10.0
+    _attr_native_max_value = 30.5
+    _attr_native_step = 0.5
+    _attr_native_unit_of_measurement = "°C"
+
+    def __init__(
+        self, api: RemehaApi, coordinator: RemehaUpdateCoordinator, parent_device_id: int | None
+    ):
+        """Create a new summer/winter threshold entity."""
+
+        super().__init__(
+            api=api,
+            coordinator=coordinator,
+            parent_device_id=parent_device_id,
+            name="summer_winter",
+        )
+
+    @property
+    def native_value(self) -> float:
+        """Return the current summer/winter threshold."""
+
+        return cast(float, self._appliance.summer_winter)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the summer/winter threshold."""
+
+        await self._api.async_write_variable(variable=MetaRegisters.SUMMER_WINTER, value=value)
+
+        # Reflect the change immediately, until the next coordinator refresh.
+        self._appliance.summer_winter = value
+        self.async_write_ha_state()
 
 
 class RemehaTransitionSeasonNumber(RemehaApplianceEntity, NumberEntity):

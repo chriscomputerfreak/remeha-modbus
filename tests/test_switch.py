@@ -53,3 +53,33 @@ async def test_forced_summer_switch(hass: HomeAssistant, mock_modbus_client, moc
         forced_summer = hass.states.get(forced_summer.entity_id)
         assert forced_summer is not None
         assert forced_summer.state == "on"
+
+
+async def test_appliance_switches(hass: HomeAssistant, mock_modbus_client, mock_config_entry):
+    """Test the appliance-level modbus switches (AP016 / AP028)."""
+
+    api = get_api(mock_modbus_client=mock_modbus_client)
+    with patch(
+        "custom_components.remeha_modbus.api.RemehaApi.create",
+        new=lambda *args, **kwargs: api,
+    ):
+        await setup_platform(hass=hass, config_entry=mock_config_entry)
+        await hass.async_block_till_done()
+
+        ch_enabled = hass.states.get("switch.remeha_modbus_test_hub_ch_enabled")
+        assert ch_enabled is not None
+
+        cooling_enabled = hass.states.get("switch.remeha_modbus_test_hub_cooling_enabled")
+        assert cooling_enabled is not None
+        assert cooling_enabled.state == "on"
+
+        await hass.services.async_call(
+            domain=SwitchDomain,
+            service="turn_off",
+            service_data={"entity_id": cooling_enabled.entity_id},
+            blocking=True,
+        )
+
+        cooling_enabled = hass.states.get(cooling_enabled.entity_id)
+        assert cooling_enabled is not None
+        assert cooling_enabled.state == "off"

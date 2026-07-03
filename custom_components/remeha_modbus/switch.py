@@ -19,6 +19,7 @@ from homeassistant.helpers.restore_state import RestoreEntity
 from propcache.api import cached_property
 
 from custom_components.remeha_modbus.api import DeviceInstance, RemehaApi
+from custom_components.remeha_modbus.api.appliance import CoolingType
 from custom_components.remeha_modbus.blend.scheduler.helpers import scheduler_is_installed
 from custom_components.remeha_modbus.const import (
     DOMAIN,
@@ -50,6 +51,12 @@ async def async_setup_entry(
             RemehaScheduleSynchronizationSwitch(SWITCH_SCHEDULE_SYNC, entry),
             RemehaHeatpumpManagedSchedulesSwitch(HEATPUMP_MANAGED_SCHEDULES, entry),
             RemehaForcedSummerSwitch(
+                api=api, coordinator=coordinator, parent_device_id=parent_device_id
+            ),
+            RemehaChEnabledSwitch(
+                api=api, coordinator=coordinator, parent_device_id=parent_device_id
+            ),
+            RemehaCoolingEnabledSwitch(
                 api=api, coordinator=coordinator, parent_device_id=parent_device_id
             ),
         ]
@@ -247,4 +254,88 @@ class RemehaForcedSummerSwitch(RemehaApplianceEntity, SwitchEntity):
 
         # Reflect the change immediately, until the next coordinator refresh.
         self._appliance.forced_summer = enabled
+        self.async_write_ha_state()
+
+
+class RemehaChEnabledSwitch(RemehaApplianceEntity, SwitchEntity):
+    """Switch that enables/disables central heating demand processing (parameter AP016)."""
+
+    _attr_device_class = SwitchDeviceClass.SWITCH
+
+    def __init__(
+        self, api: RemehaApi, coordinator: RemehaUpdateCoordinator, parent_device_id: int | None
+    ):
+        """Create the central heating switch."""
+
+        super().__init__(
+            api=api, coordinator=coordinator, parent_device_id=parent_device_id, name="ch_enabled"
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether central heating demand processing is enabled."""
+
+        return self._appliance.ch_enabled
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable central heating demand processing."""
+
+        await self._async_set_enabled(enabled=True)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable central heating demand processing."""
+
+        await self._async_set_enabled(enabled=False)
+
+    async def _async_set_enabled(self, enabled: bool) -> None:
+        await self._api.async_write_variable(variable=MetaRegisters.CH_ENABLED, value=enabled)
+
+        # Reflect the change immediately, until the next coordinator refresh.
+        self._appliance.ch_enabled = enabled
+        self.async_write_ha_state()
+
+
+class RemehaCoolingEnabledSwitch(RemehaApplianceEntity, SwitchEntity):
+    """Switch that enables/disables cooling (parameter AP028).
+
+    Turning the switch on selects active cooling; turning it off disables cooling.
+    """
+
+    _attr_device_class = SwitchDeviceClass.SWITCH
+
+    def __init__(
+        self, api: RemehaApi, coordinator: RemehaUpdateCoordinator, parent_device_id: int | None
+    ):
+        """Create the cooling switch."""
+
+        super().__init__(
+            api=api,
+            coordinator=coordinator,
+            parent_device_id=parent_device_id,
+            name="cooling_enabled",
+        )
+
+    @property
+    def is_on(self) -> bool:
+        """Return whether cooling is enabled."""
+
+        return self._appliance.cooling_type is not CoolingType.OFF
+
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Enable active cooling."""
+
+        await self._async_set_cooling(CoolingType.ACTIVE_COOLING)
+
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Disable cooling."""
+
+        await self._async_set_cooling(CoolingType.OFF)
+
+    async def _async_set_cooling(self, cooling_type: CoolingType) -> None:
+        await self._api.async_write_variable(
+            variable=MetaRegisters.COOLING_ENABLED, value=cooling_type
+        )
+
+        # Reflect the change immediately, until the next coordinator refresh.
+        self._appliance.cooling_type = cooling_type
         self.async_write_ha_state()
