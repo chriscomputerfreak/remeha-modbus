@@ -219,6 +219,18 @@ class Appliance:
     """Temperature band below the summer/winter limit within which the appliance
     neither heats nor cools (parameter AP075)."""
 
+    force_summer: bool = False
+    """Whether forced summer mode is active (parameter AP074)."""
+
+    quiet_mode_level: int = 0
+    """Heat pump silent mode level: 0 = off, 1 = level 1, 2 = level 2 (HP058)."""
+
+    quiet_mode_start: int = 0
+    """Start of the heat pump silent period, in 10-minute units from midnight (HP094)."""
+
+    quiet_mode_end: int = 0
+    """End of the heat pump silent period, in 10-minute units from midnight (HP095)."""
+
     def is_cooling_required(self) -> bool:
         """Whether the appliance cooling mode is required.
 
