@@ -777,6 +777,10 @@ class MetaRegisters:
         start_address=385, name="varApSeasonMode", data_type=DataType.UINT8
     )
 
+    APPLIANCE_DEMAND_STATUS: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=275, name="applianceDemandStatus", data_type=DataType.UINT8
+    )
+
     SUMMER_WINTER: Final[ModbusVariableDescription] = ModbusVariableDescription(
         start_address=386,
         name="varApSummerWinter",
@@ -825,6 +829,50 @@ class MetaRegisters:
 
     POWER_ACTUAL: Final[ModbusVariableDescription] = ModbusVariableDescription(
         start_address=413, name="varApPowerActual", data_type=DataType.UINT16, scale=0.01
+    )
+
+    GENERATOR_STARTS_TOTAL: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=419, name="varApGeneratorStartsTotal", data_type=DataType.UINT32
+    )
+
+    GENERATOR_HOURS_TOTAL: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=421, name="varApGeneratorHoursTotal", data_type=DataType.UINT32
+    )
+
+    BACKUP1_STARTS: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=423, name="varApBackup1Starts", data_type=DataType.UINT32
+    )
+
+    BACKUP1_HOURS: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=425, name="varApBackup1Hours", data_type=DataType.UINT32
+    )
+
+    BACKUP2_STARTS: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=427, name="varApBackup2Starts", data_type=DataType.UINT32
+    )
+
+    BACKUP2_HOURS: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=429, name="varApBackup2Hours", data_type=DataType.UINT32
+    )
+
+    POWER_ON_HOURS: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=431, name="varApPowerOnHours", data_type=DataType.UINT32
+    )
+
+    CH_ENERGY_CONSUMPTION: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=433, name="varApChEnergyConsumption", data_type=DataType.UINT32
+    )
+
+    DHW_ENERGY_CONSUMPTION: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=435, name="varApDhwEnergyConsumption", data_type=DataType.UINT32
+    )
+
+    COOLING_ENERGY_CONSUMPTION: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=437, name="varApCoolingEnergyConsumption", data_type=DataType.UINT32
+    )
+
+    BACKUP_ENERGY_CONSUMPTION: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=441, name="varApBackupEnergyConsumption", data_type=DataType.UINT32
     )
 
     TOTAL_ENERGY_CONSUMPTION: Final[ModbusVariableDescription] = ModbusVariableDescription(
@@ -1102,6 +1150,102 @@ WEEKDAY_TO_MODBUS_VARIABLE: Final[dict[Weekday, ModbusVariableDescription]] = {
     Weekday.SUNDAY: ZoneRegisters.TIME_PROGRAM_SUNDAY,
 }
 
+# Option keys for the ENUM status sensors. The human-readable values are provided
+# as translations (see the `entity.sensor` section in the translation files).
+SEASON_MODE_OPTIONS: Final[dict[int, str]] = {
+    0: "winter",
+    1: "frost_protection",
+    2: "transition_season",
+    3: "summer",
+}
+
+STATUS_OPTIONS: Final[dict[int, str]] = {
+    0: "standby",
+    1: "heat_demand",
+    2: "generator_start",
+    3: "generator_heating",
+    4: "generator_dhw",
+    5: "generator_stop",
+    6: "pump_post_run",
+    7: "cooling",
+    8: "controlled_shutdown",
+    9: "start_prevention",
+    10: "locking_mode",
+    11: "load_test_min",
+    12: "load_test_heating_max",
+    13: "load_test_dhw_max",
+    15: "manual_heat_demand",
+    16: "frost_protection",
+    17: "venting",
+    18: "control_unit_cooling",
+    19: "resetting",
+    20: "automatic_filling",
+    21: "stopped",
+    22: "calibration",
+    23: "factory_test",
+    24: "hydraulic_balancing",
+    200: "device_mode",
+    254: "unknown",
+}
+
+SUBSTATUS_OPTIONS: Final[dict[int, str]] = {
+    0: "standby",
+    1: "pause_time",
+    2: "close_hydraulic_valve",
+    3: "stop_pump",
+    4: "wait_start_release",
+    21: "generator_starting",
+    30: "internal_setpoint",
+    31: "limited_internal_setpoint",
+    32: "power_controlled",
+    60: "pump_post_run",
+    61: "start_pump",
+    63: "start_pause_time",
+    65: "compressor_unloaded",
+    66: "hp_tmax_backup_on",
+    67: "outside_temp_limit_hp_off",
+    68: "hp_stop_by_hybrid",
+    69: "defrost_with_heat_pump",
+    70: "defrost_with_backup",
+    71: "defrost_hp_and_backup",
+    73: "hp_flow_above_tmax",
+    75: "hp_off_high_humidity",
+    76: "hp_off_flow",
+    79: "generator_unloaded",
+    80: "hp_unloaded_cooling",
+    81: "hp_stop_outside_temp",
+    82: "hp_off_flow_tmax",
+    88: "bl_backup_off",
+    89: "bl_heat_pump_off",
+    90: "bl_hp_and_backup_off",
+    91: "low_tariff",
+    92: "pv_with_heat_pump",
+    93: "pv_hp_and_backup",
+    94: "smart_grid",
+    95: "wait_water_pressure",
+    96: "no_generator_available",
+    102: "free_cooling_pump_off",
+    103: "free_cooling_pump_on",
+    106: "blocking_active",
+    107: "warming_up",
+    108: "curative_defrost",
+    109: "preventive_defrost",
+    200: "init_completed",
+    201: "init_csu",
+    202: "init_identification",
+    203: "init_blocking_parameters",
+    204: "init_safety_unit",
+    205: "init_blocking",
+    254: "unknown",
+    255: "safety_shutdown",
+}
+
+REMEHA_ENUM_SENSOR_OPTIONS: Final[dict[ModbusVariableDescription, dict[int, str]]] = {
+    MetaRegisters.SEASON_MODE: SEASON_MODE_OPTIONS,
+    MetaRegisters.STATUS: STATUS_OPTIONS,
+    MetaRegisters.SUBSTATUS: SUBSTATUS_OPTIONS,
+}
+
 REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] = {
     MetaRegisters.CURRENT_ERROR: SensorEntityDescription(  # 277
         key=MetaRegisters.CURRENT_ERROR.name, name="current_error"
@@ -1115,6 +1259,13 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         name="outside_temperature",
         native_unit_of_measurement="°C",
         state_class=SensorStateClass.MEASUREMENT,
+    ),
+    MetaRegisters.SEASON_MODE: SensorEntityDescription(  # 385
+        key=MetaRegisters.SEASON_MODE.name,
+        name="season_mode",
+        translation_key="season_mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(SEASON_MODE_OPTIONS.values()),
     ),
     MetaRegisters.FLOW_TEMPERATURE: SensorEntityDescription(  # 400
         key=MetaRegisters.FLOW_TEMPERATURE.name,
@@ -1159,10 +1310,18 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         state_class=SensorStateClass.MEASUREMENT,
     ),
     MetaRegisters.STATUS: SensorEntityDescription(  # 411
-        key=MetaRegisters.STATUS.name, name="status"
+        key=MetaRegisters.STATUS.name,
+        name="status",
+        translation_key="status",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(STATUS_OPTIONS.values()),
     ),
     MetaRegisters.SUBSTATUS: SensorEntityDescription(  # 412
-        key=MetaRegisters.SUBSTATUS.name, name="substatus"
+        key=MetaRegisters.SUBSTATUS.name,
+        name="substatus",
+        translation_key="substatus",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(SUBSTATUS_OPTIONS.values()),
     ),
     MetaRegisters.POWER_ACTUAL: SensorEntityDescription(  # 413
         key=MetaRegisters.POWER_ACTUAL.name,
@@ -1170,6 +1329,80 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         native_unit_of_measurement="%",
         device_class=SensorDeviceClass.POWER_FACTOR,
         state_class=SensorStateClass.MEASUREMENT,
+    ),
+    MetaRegisters.GENERATOR_STARTS_TOTAL: SensorEntityDescription(  # 419
+        key=MetaRegisters.GENERATOR_STARTS_TOTAL.name,
+        name="generator_starts_total",
+        native_unit_of_measurement="starts",
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.GENERATOR_HOURS_TOTAL: SensorEntityDescription(  # 421
+        key=MetaRegisters.GENERATOR_HOURS_TOTAL.name,
+        name="generator_hours_total",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP1_STARTS: SensorEntityDescription(  # 423
+        key=MetaRegisters.BACKUP1_STARTS.name,
+        name="backup1_starts",
+        native_unit_of_measurement="starts",
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP1_HOURS: SensorEntityDescription(  # 425
+        key=MetaRegisters.BACKUP1_HOURS.name,
+        name="backup1_hours",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP2_STARTS: SensorEntityDescription(  # 427
+        key=MetaRegisters.BACKUP2_STARTS.name,
+        name="backup2_starts",
+        native_unit_of_measurement="starts",
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP2_HOURS: SensorEntityDescription(  # 429
+        key=MetaRegisters.BACKUP2_HOURS.name,
+        name="backup2_hours",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.POWER_ON_HOURS: SensorEntityDescription(  # 431
+        key=MetaRegisters.POWER_ON_HOURS.name,
+        name="power_on_hours",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.CH_ENERGY_CONSUMPTION: SensorEntityDescription(  # 433
+        key=MetaRegisters.CH_ENERGY_CONSUMPTION.name,
+        name="ch_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.DHW_ENERGY_CONSUMPTION: SensorEntityDescription(  # 435
+        key=MetaRegisters.DHW_ENERGY_CONSUMPTION.name,
+        name="dhw_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.COOLING_ENERGY_CONSUMPTION: SensorEntityDescription(  # 437
+        key=MetaRegisters.COOLING_ENERGY_CONSUMPTION.name,
+        name="cooling_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP_ENERGY_CONSUMPTION: SensorEntityDescription(  # 441
+        key=MetaRegisters.BACKUP_ENERGY_CONSUMPTION.name,
+        name="backup_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
     ),
     MetaRegisters.TOTAL_ENERGY_CONSUMPTION: SensorEntityDescription(  # 439
         key=MetaRegisters.TOTAL_ENERGY_CONSUMPTION.name,

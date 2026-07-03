@@ -16,6 +16,7 @@ from homeassistant.helpers.update_coordinator import CoordinatorEntity
 from custom_components.remeha_modbus.api import DeviceInstance
 from custom_components.remeha_modbus.const import (
     DOMAIN,
+    REMEHA_ENUM_SENSOR_OPTIONS,
     REMEHA_SENSORS,
     ModbusVariableDescription,
 )
@@ -77,14 +78,29 @@ class RemehaSensorEntity(CoordinatorEntity[RemehaUpdateCoordinator], SensorEntit
         self._attr_device_class = description.device_class
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
+        self._attr_options = description.options
+
+        # ENUM sensors use their own translation key so their state values can be translated.
+        if description.translation_key is not None:
+            self._attr_translation_key = description.translation_key
 
     @property
     def native_value(self):
         """Return the value of this sensor."""
 
-        return cast(RemehaUpdateCoordinator, self.coordinator).get_sensor_value(
+        value = cast(RemehaUpdateCoordinator, self.coordinator).get_sensor_value(
             variable=self._variable
         )
+
+        if value is None:
+            return None
+
+        # For ENUM sensors, map the raw register value to a (translatable) option key.
+        options = REMEHA_ENUM_SENSOR_OPTIONS.get(self._variable)
+        if options is not None:
+            return options.get(int(value))
+
+        return value
 
     @property
     def device_info(self) -> DeviceInfo | None:
