@@ -139,6 +139,8 @@ async def test_read_sensor_values(mock_modbus_client):
                 20.44,
                 20.00,
                 21.14,
+                23.55,
+                23.00,
                 22.54,
                 1.2,
                 12.66,
