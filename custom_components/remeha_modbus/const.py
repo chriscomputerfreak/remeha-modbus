@@ -1113,6 +1113,24 @@ class ZoneRegisters:
     )
     """Slope (steepness) of the weather-compensated heat curve of the zone."""
 
+    HEATING_CURVE_BASE_COMFORT: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=675,
+        name="parZoneClimaticCurveFootComfort",
+        data_type=DataType.UINT16,
+        scale=0.1,
+        friendly_name="CP210",
+    )
+    """Curve base (foot point) temperature in comfort mode (15 C = OFF)."""
+
+    HEATING_CURVE_BASE_REDUCED: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=676,
+        name="parZoneClimaticCurveFootReduced",
+        data_type=DataType.UINT16,
+        scale=0.1,
+        friendly_name="CP220",
+    )
+    """Curve base (foot point) temperature in reduced mode (15 C = OFF)."""
+
     FLOW_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
         start_address=1100,
         name="varZoneTFlow",

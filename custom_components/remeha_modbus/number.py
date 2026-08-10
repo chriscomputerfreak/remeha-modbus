@@ -17,6 +17,7 @@ from custom_components.remeha_modbus.const import (
     TEMPERATURE_STEP,
     Limits,
     MetaRegisters,
+    ModbusVariableDescription,
     ZoneRegisters,
 )
 from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
@@ -57,10 +58,13 @@ async def async_setup_entry(
         _LOGGER.debug("No DHW climates found so not adding any DhwHysteresis entities.")
 
     heating_zones: list[ClimateZone] = coordinator.get_climates(lambda c: c.is_central_heating())
-    if heating_zones:
-        entities.extend(
-            HeatingCurveSlopeEntity(api=api, coordinator=coordinator, zone_id=zone.id)
-            for zone in heating_zones
+    for zone in heating_zones:
+        entities.append(HeatingCurveSlopeEntity(api=api, coordinator=coordinator, zone_id=zone.id))
+        entities.append(
+            HeatingCurveBaseComfortEntity(api=api, coordinator=coordinator, zone_id=zone.id)
+        )
+        entities.append(
+            HeatingCurveBaseReducedEntity(api=api, coordinator=coordinator, zone_id=zone.id)
         )
 
     async_add_entities(entities)
@@ -131,6 +135,89 @@ class HeatingCurveSlopeEntity(CoordinatorEntity[RemehaUpdateCoordinator], Number
             if device_instance is not None
             else None
         )
+
+
+class _HeatingCurveBaseEntity(CoordinatorEntity[RemehaUpdateCoordinator], NumberEntity):
+    """Base class for the heat-curve foot-point temperatures of a heating zone."""
+
+    _attr_has_entity_name = True
+    _attr_device_class: NumberDeviceClass = NumberDeviceClass.TEMPERATURE
+    _attr_native_max_value = 40.0
+    _attr_native_min_value = 15.0
+    _attr_native_step = 0.1
+    _attr_native_unit_of_measurement = "°C"
+    _attr_should_poll = False
+    _attr_translation_key = DOMAIN
+
+    _register: ModbusVariableDescription
+    _field: str
+
+    def __init__(self, api: RemehaApi, coordinator: RemehaUpdateCoordinator, zone_id: int):
+        """Create a new foot-point entity."""
+
+        super().__init__(coordinator)
+
+        self._api: RemehaApi = api
+        self._climate_zone_id = zone_id
+        self._attr_unique_id = f"{self._attr_name}_{zone_id}"
+
+    @property
+    def _zone(self) -> ClimateZone:
+        """Return the modbus climate zone."""
+        return self.coordinator.data["climates"][self._climate_zone_id]
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current foot-point temperature."""
+
+        return getattr(self._zone, self._field)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the foot-point temperature."""
+
+        zone: ClimateZone = self._zone
+        offset: int = self._api.get_zone_register_offset(zone=zone)
+        await self._api.async_write_variable(variable=self._register, value=value, offset=offset)
+
+        setattr(zone, self._field, value)
+        self.async_write_ha_state()
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return information about the device this instance belongs to."""
+        zone: ClimateZone = self._zone
+
+        if zone.owning_device is None:
+            return None
+
+        device_instance: DeviceInstance | None = self.coordinator.get_device(id=zone.owning_device)
+        return (
+            DeviceInfo(
+                identifiers={(DOMAIN, str(device_instance.article_number))},
+                hw_version=f"HW{device_instance.hw_version[0]:02d}.{device_instance.hw_version[1]:02d}",
+                manufacturer="Remeha",
+                model=str(device_instance.board_category),
+                sw_version=f"SW{device_instance.sw_version[0]:02d}.{device_instance.sw_version[1]:02d}",
+            )
+            if device_instance is not None
+            else None
+        )
+
+
+class HeatingCurveBaseComfortEntity(_HeatingCurveBaseEntity):
+    """Heat-curve foot-point temperature in comfort mode (parameter CP210)."""
+
+    _attr_name = "heating_curve_base_comfort"
+    _register = ZoneRegisters.HEATING_CURVE_BASE_COMFORT
+    _field = "heating_curve_base_comfort"
+
+
+class HeatingCurveBaseReducedEntity(_HeatingCurveBaseEntity):
+    """Heat-curve foot-point temperature in reduced mode (parameter CP220)."""
+
+    _attr_name = "heating_curve_base_reduced"
+    _register = ZoneRegisters.HEATING_CURVE_BASE_REDUCED
+    _field = "heating_curve_base_reduced"
 
 
 class DhwHysteresisEntity(CoordinatorEntity[RemehaUpdateCoordinator], NumberEntity):

@@ -1062,6 +1062,24 @@ class RemehaApi:
                 destination_variable=ZoneRegisters.HEATING_CURVE_SLOPE,
             ),
         )
+        heating_curve_base_comfort = cast(
+            float | None,
+            from_registers(
+                registers=await self._async_read_registers(
+                    variable=ZoneRegisters.HEATING_CURVE_BASE_COMFORT, offset=zone_register_offset
+                ),
+                destination_variable=ZoneRegisters.HEATING_CURVE_BASE_COMFORT,
+            ),
+        )
+        heating_curve_base_reduced = cast(
+            float | None,
+            from_registers(
+                registers=await self._async_read_registers(
+                    variable=ZoneRegisters.HEATING_CURVE_BASE_REDUCED, offset=zone_register_offset
+                ),
+                destination_variable=ZoneRegisters.HEATING_CURVE_BASE_REDUCED,
+            ),
+        )
         zone_flow_temperature = cast(
             float | None,
             from_registers(
@@ -1212,6 +1230,8 @@ class RemehaApi:
             dhw_reduced_setpoint=dhw_reduced_setpoint,
             dhw_calorifier_hysteresis=dhw_calorifier_hysteresis,
             heating_curve_slope=heating_curve_slope,
+            heating_curve_base_comfort=heating_curve_base_comfort,
+            heating_curve_base_reduced=heating_curve_base_reduced,
             flow_temperature=zone_flow_temperature,
             temporary_setpoint_end_time=(
                 TimeOfDay.from_bytes(data=end_time_temporary_override, time_zone=self._time_zone)
@@ -1335,6 +1355,24 @@ class RemehaApi:
                     variable=ZoneRegisters.HEATING_CURVE_SLOPE, offset=zone_register_offset
                 ),
                 destination_variable=ZoneRegisters.HEATING_CURVE_SLOPE,
+            ),
+        )
+        heating_curve_base_comfort = cast(
+            float | None,
+            from_registers(
+                registers=await self._async_read_registers(
+                    variable=ZoneRegisters.HEATING_CURVE_BASE_COMFORT, offset=zone_register_offset
+                ),
+                destination_variable=ZoneRegisters.HEATING_CURVE_BASE_COMFORT,
+            ),
+        )
+        heating_curve_base_reduced = cast(
+            float | None,
+            from_registers(
+                registers=await self._async_read_registers(
+                    variable=ZoneRegisters.HEATING_CURVE_BASE_REDUCED, offset=zone_register_offset
+                ),
+                destination_variable=ZoneRegisters.HEATING_CURVE_BASE_REDUCED,
             ),
         )
         zone_flow_temperature = cast(
@@ -1493,6 +1531,8 @@ class RemehaApi:
             dhw_reduced_setpoint=dhw_reduced_setpoint,
             dhw_calorifier_hysteresis=dhw_calorifier_hysteresis,
             heating_curve_slope=heating_curve_slope,
+            heating_curve_base_comfort=heating_curve_base_comfort,
+            heating_curve_base_reduced=heating_curve_base_reduced,
             flow_temperature=zone_flow_temperature,
             temporary_setpoint_end_time=(
                 TimeOfDay.from_bytes(data=end_time_temporary_override, time_zone=self._time_zone)

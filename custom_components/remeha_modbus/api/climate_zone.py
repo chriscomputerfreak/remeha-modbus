@@ -147,6 +147,12 @@ class ClimateZone:
     heating_curve_slope: float | None = None
     """Slope (steepness) of the weather-compensated heat curve (parameter CP230)."""
 
+    heating_curve_base_comfort: float | None = None
+    """Curve base (foot point) temperature in comfort mode (parameter CP210)."""
+
+    heating_curve_base_reduced: float | None = None
+    """Curve base (foot point) temperature in reduced mode (parameter CP220)."""
+
     flow_temperature: float | None = None
     """Measured flow (supply) water temperature of the zone (parameter CM040)."""
 

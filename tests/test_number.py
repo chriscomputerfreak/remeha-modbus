@@ -22,8 +22,8 @@ async def test_climates(hass: HomeAssistant, mock_modbus_client, mock_config_ent
         await hass.async_block_till_done()
 
         # DhwHysteresisEntity + RemehaSummerWinterNumber + RemehaNeutralBandNumber
-        # + HeatingCurveSlopeEntity.
-        assert len(hass.states.async_all(domain_filter="number")) == 4
+        # + HeatingCurveSlopeEntity + HeatingCurveBaseComfortEntity + HeatingCurveBaseReducedEntity.
+        assert len(hass.states.async_all(domain_filter="number")) == 6
 
 
 @pytest.mark.parametrize("mock_modbus_client", ["modbus_store.json"], indirect=True)
