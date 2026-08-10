@@ -835,6 +835,16 @@ class MetaRegisters:
         start_address=404, name="varHpHeatPumpTR", data_type=DataType.INT16, scale=0.01
     )
 
+    BUFFER_TEMPERATURE_BOTTOM: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=7600, name="varBufferTemperatureBottom", data_type=DataType.INT16, scale=0.01
+    )
+    """Measured buffer tank temperature at the bottom sensor (parameter BM001)."""
+
+    BUFFER_TEMPERATURE_TOP: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=7601, name="varBufferTemperatureTop", data_type=DataType.INT16, scale=0.01
+    )
+    """Measured buffer tank temperature at the top sensor (parameter BM002)."""
+
     WATER_PRESSURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
         start_address=409, name="varApWaterPressure", data_type=DataType.UINT8, scale=0.1
     )
@@ -1094,6 +1104,24 @@ class ZoneRegisters:
         scale=0.01,
         friendly_name="CP360",
     )
+    HEATING_CURVE_SLOPE: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=674,
+        name="parZoneClimaticCurve",
+        data_type=DataType.UINT8,
+        scale=0.1,
+        friendly_name="CP230",
+    )
+    """Slope (steepness) of the weather-compensated heat curve of the zone."""
+
+    FLOW_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
+        start_address=1100,
+        name="varZoneTFlow",
+        data_type=DataType.INT16,
+        scale=0.01,
+        friendly_name="CM040",
+    )
+    """Measured flow (supply) water temperature of the zone."""
+
     DHW_CALORIFIER_HYSTERESIS: Final[ModbusVariableDescription] = ModbusVariableDescription(
         start_address=686,
         # It's actually Hysteresis (with an e), but since the parameter list defines it
@@ -1330,6 +1358,20 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         key=MetaRegisters.HEAT_PUMP_FLOW_TEMPERATURE.name,
         device_class=SensorDeviceClass.TEMPERATURE,
         name="heat_pump_flow_temperature",
+        native_unit_of_measurement="°C",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    MetaRegisters.BUFFER_TEMPERATURE_BOTTOM: SensorEntityDescription(  # 7600
+        key=MetaRegisters.BUFFER_TEMPERATURE_BOTTOM.name,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        name="buffer_temperature_bottom",
+        native_unit_of_measurement="°C",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    MetaRegisters.BUFFER_TEMPERATURE_TOP: SensorEntityDescription(  # 7601
+        key=MetaRegisters.BUFFER_TEMPERATURE_TOP.name,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        name="buffer_temperature_top",
         native_unit_of_measurement="°C",
         state_class=SensorStateClass.MEASUREMENT,
     ),

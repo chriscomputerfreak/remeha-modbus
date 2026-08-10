@@ -4,8 +4,10 @@ import logging
 from typing import cast
 
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -14,6 +16,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from custom_components.remeha_modbus.api import DeviceInstance
+from custom_components.remeha_modbus.api.climate_zone import ClimateZone
 from custom_components.remeha_modbus.const import (
     DOMAIN,
     REMEHA_ENUM_SENSOR_OPTIONS,
@@ -33,17 +36,22 @@ async def async_setup_entry(
     coordinator: RemehaUpdateCoordinator = entry.runtime_data["coordinator"]
     mainboards: list[DeviceInstance] = coordinator.get_devices(lambda device: device.is_mainboard())
 
-    async_add_entities(
-        [
-            RemehaSensorEntity(
-                coordinator=coordinator,
-                parent_device_id=mainboards[0].id if mainboards else None,
-                description=sensor_description,
-                variable=modbus_description,
-            )
-            for modbus_description, sensor_description in REMEHA_SENSORS.items()
-        ]
+    entities: list[SensorEntity] = [
+        RemehaSensorEntity(
+            coordinator=coordinator,
+            parent_device_id=mainboards[0].id if mainboards else None,
+            description=sensor_description,
+            variable=modbus_description,
+        )
+        for modbus_description, sensor_description in REMEHA_SENSORS.items()
+    ]
+
+    entities.extend(
+        RemehaZoneFlowTemperatureSensor(coordinator=coordinator, zone_id=zone.id)
+        for zone in coordinator.get_climates(lambda c: c.is_central_heating())
     )
+
+    async_add_entities(entities)
 
 
 class RemehaSensorEntity(CoordinatorEntity[RemehaUpdateCoordinator], SensorEntity):
@@ -117,6 +125,58 @@ class RemehaSensorEntity(CoordinatorEntity[RemehaUpdateCoordinator], SensorEntit
         device_instance: DeviceInstance | None = self.coordinator.get_device(
             id=self._parent_device_id
         )
+        return (
+            DeviceInfo(
+                identifiers={(DOMAIN, str(device_instance.article_number))},
+                hw_version=f"HW{device_instance.hw_version[0]:02d}.{device_instance.hw_version[1]:02d}",
+                manufacturer="Remeha",
+                model=str(device_instance.board_category),
+                sw_version=f"SW{device_instance.sw_version[0]:02d}.{device_instance.sw_version[1]:02d}",
+            )
+            if device_instance is not None
+            else None
+        )
+
+
+class RemehaZoneFlowTemperatureSensor(CoordinatorEntity[RemehaUpdateCoordinator], SensorEntity):
+    """Measured flow (supply) temperature of a heating zone (parameter CM040)."""
+
+    _attr_has_entity_name = True
+    _attr_device_class = SensorDeviceClass.TEMPERATURE
+    _attr_native_unit_of_measurement = "°C"
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_should_poll = False
+    _attr_translation_key = DOMAIN
+
+    def __init__(self, coordinator: RemehaUpdateCoordinator, zone_id: int):
+        """Create a new zone flow-temperature sensor."""
+
+        super().__init__(coordinator=coordinator)
+
+        self._climate_zone_id = zone_id
+        self._attr_unique_id = f"zone_flow_temperature_{zone_id}"
+        self._attr_name = "zone_flow_temperature"
+
+    @property
+    def _zone(self) -> ClimateZone:
+        """Return the modbus climate zone."""
+        return self.coordinator.data["climates"][self._climate_zone_id]
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current flow temperature of the zone."""
+
+        return self._zone.flow_temperature
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return information about the device this sensor belongs to."""
+        zone: ClimateZone = self._zone
+
+        if zone.owning_device is None:
+            return None
+
+        device_instance: DeviceInstance | None = self.coordinator.get_device(id=zone.owning_device)
         return (
             DeviceInfo(
                 identifiers={(DOMAIN, str(device_instance.article_number))},

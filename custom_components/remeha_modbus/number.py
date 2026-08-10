@@ -56,7 +56,81 @@ async def async_setup_entry(
     else:
         _LOGGER.debug("No DHW climates found so not adding any DhwHysteresis entities.")
 
+    heating_zones: list[ClimateZone] = coordinator.get_climates(lambda c: c.is_central_heating())
+    if heating_zones:
+        entities.extend(
+            HeatingCurveSlopeEntity(api=api, coordinator=coordinator, zone_id=zone.id)
+            for zone in heating_zones
+        )
+
     async_add_entities(entities)
+
+
+class HeatingCurveSlopeEntity(CoordinatorEntity[RemehaUpdateCoordinator], NumberEntity):
+    """Heat-curve slope (steepness) linked to a central-heating zone (parameter CP230)."""
+
+    _attr_has_entity_name = True
+    _attr_native_max_value = 4.0
+    _attr_native_min_value = 0.0
+    _attr_native_step = 0.1
+    _attr_should_poll = False
+    _attr_translation_key = DOMAIN
+
+    def __init__(self, api: RemehaApi, coordinator: RemehaUpdateCoordinator, zone_id: int):
+        """Create a new heat-curve slope entity."""
+
+        super().__init__(coordinator)
+
+        self._api: RemehaApi = api
+        self._climate_zone_id = zone_id
+        self._attr_unique_id = f"heating_curve_slope_{zone_id}"
+        self._attr_name = "heating_curve_slope"
+
+    @property
+    def _zone(self) -> ClimateZone:
+        """Return the modbus climate zone."""
+        return self.coordinator.data["climates"][self._climate_zone_id]
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current heat-curve slope."""
+
+        return self._zone.heating_curve_slope
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the heat-curve slope."""
+
+        zone: ClimateZone = self._zone
+        offset: int = self._api.get_zone_register_offset(zone=zone)
+        await self._api.async_write_variable(
+            variable=ZoneRegisters.HEATING_CURVE_SLOPE, value=value, offset=offset
+        )
+
+        # Update the value so users don't have to wait until the next sync.
+        zone.heating_curve_slope = value
+
+        self.async_write_ha_state()
+
+    @property
+    def device_info(self) -> DeviceInfo | None:
+        """Return information about the device this instance belongs to."""
+        zone: ClimateZone = self._zone
+
+        if zone.owning_device is None:
+            return None
+
+        device_instance: DeviceInstance | None = self.coordinator.get_device(id=zone.owning_device)
+        return (
+            DeviceInfo(
+                identifiers={(DOMAIN, str(device_instance.article_number))},
+                hw_version=f"HW{device_instance.hw_version[0]:02d}.{device_instance.hw_version[1]:02d}",
+                manufacturer="Remeha",
+                model=str(device_instance.board_category),
+                sw_version=f"SW{device_instance.sw_version[0]:02d}.{device_instance.sw_version[1]:02d}",
+            )
+            if device_instance is not None
+            else None
+        )
 
 
 class DhwHysteresisEntity(CoordinatorEntity[RemehaUpdateCoordinator], NumberEntity):

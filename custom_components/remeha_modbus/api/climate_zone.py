@@ -144,6 +144,12 @@ class ClimateZone:
     appliance_requires_cooling: bool = False
     """Whether the related appliance requires cooling"""
 
+    heating_curve_slope: float | None = None
+    """Slope (steepness) of the weather-compensated heat curve (parameter CP230)."""
+
+    flow_temperature: float | None = None
+    """Measured flow (supply) water temperature of the zone (parameter CM040)."""
+
     def _get_cooling_scheduling_setpoint(self, setpoint_type: TimeslotSetpointType) -> float | None:
         match setpoint_type:
             case TimeslotSetpointType.ECO:
