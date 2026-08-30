@@ -10,6 +10,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_NAME, CONF_TYPE, EVENT_HOMEASSISTANT_STARTED, Platform
 from homeassistant.core import Event, HomeAssistant
 from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
+from homeassistant.helpers.device_registry import DeviceEntry
 from homeassistant.helpers.typing import NoEventData
 from pymodbus import ModbusException
 
@@ -148,3 +149,21 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     )
 
     return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow deleting a device from the UI if the integration no longer provides it.
+
+    A device may become stale after the appliance topology changes or after an
+    upgrade that alters how device identifiers are built. Such devices carry no
+    entities and can be removed. Devices that still map to a known board are kept.
+    """
+
+    coordinator: RemehaUpdateCoordinator = config_entry.runtime_data["coordinator"]
+    known_identifiers = {
+        (DOMAIN, str(device.article_number)) for device in coordinator.get_devices()
+    }
+
+    return not device_entry.identifiers & known_identifiers
