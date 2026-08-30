@@ -14,6 +14,9 @@ from aio_remeha_modbus.api.const import (
     ModbusVariableDescription,
     Weekday,
 )
+from aio_remeha_modbus.api.const import (
+    DataType as ModbusDataType,
+)
 from homeassistant.components.climate.const import (
     PRESET_COMFORT,
     PRESET_ECO,
@@ -736,6 +739,23 @@ REMEHA_ENUM_SENSOR_OPTIONS: Final[dict[ModbusVariableDescription, dict[int, str]
     MetaRegisters.SUBSTATUS: SUBSTATUS_OPTIONS,
 }
 
+# Buffer tank temperatures (BM001/BM002). These appliance-wide registers are not part of
+# the aio-remeha-modbus register set, so they are described here.
+BUFFER_TEMPERATURE_BOTTOM: Final[ModbusVariableDescription] = ModbusVariableDescription(
+    start_address=7600,
+    name="varBufferTemperatureBottom",
+    data_type=ModbusDataType.INT16,
+    scale=0.01,
+    friendly_name="BM001",
+)
+BUFFER_TEMPERATURE_TOP: Final[ModbusVariableDescription] = ModbusVariableDescription(
+    start_address=7601,
+    name="varBufferTemperatureTop",
+    data_type=ModbusDataType.INT16,
+    scale=0.01,
+    friendly_name="BM002",
+)
+
 REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] = {
     MetaRegisters.CURRENT_ERROR: SensorEntityDescription(  # 277
         key=MetaRegisters.CURRENT_ERROR.name, name="current_error"
@@ -768,6 +788,20 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         key=MetaRegisters.RETURN_TEMPERATURE.name,
         device_class=SensorDeviceClass.TEMPERATURE,
         name="return_temperature",
+        native_unit_of_measurement="°C",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    BUFFER_TEMPERATURE_BOTTOM: SensorEntityDescription(  # 7600
+        key=BUFFER_TEMPERATURE_BOTTOM.name,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        name="buffer_temperature_bottom",
+        native_unit_of_measurement="°C",
+        state_class=SensorStateClass.MEASUREMENT,
+    ),
+    BUFFER_TEMPERATURE_TOP: SensorEntityDescription(  # 7601
+        key=BUFFER_TEMPERATURE_TOP.name,
+        device_class=SensorDeviceClass.TEMPERATURE,
+        name="buffer_temperature_top",
         native_unit_of_measurement="°C",
         state_class=SensorStateClass.MEASUREMENT,
     ),
