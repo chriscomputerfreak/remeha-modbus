@@ -4,6 +4,7 @@ from datetime import datetime
 from unittest.mock import patch
 
 import pytest
+from aio_remeha_modbus.api.const import MetaRegisters
 from dateutil import tz
 from homeassistant.components.climate.const import DOMAIN as ClimateDomain
 from homeassistant.components.climate.const import (
@@ -262,6 +263,56 @@ async def test_ch_climate(hass: HomeAssistant, mock_modbus_client, mock_config_e
         circa1 = hass.states.get(entity_id="climate.remeha_modbus_test_hub_circa1")
         assert circa1 is not None
         assert circa1.attributes["preset_mode"] == REMEHA_PRESET_SCHEDULE_4
+
+
+@pytest.mark.parametrize("mock_modbus_client", ["modbus_store_cooling_zone.json"], indirect=True)
+async def test_ch_climate_forced_cooling_writes_appliance_register(
+    hass: HomeAssistant, mock_modbus_client, mock_config_entry
+):
+    """Forced cooling must write the appliance-wide COOLING_FORCED register, not an offset copy.
+
+    ``MetaRegisters.COOLING_FORCED`` (AP015, register 503) is appliance-scoped and must be
+    written without a zone offset. Writing it with the zone offset targets ``503 + offset``,
+    which is an invalid address for any non-primary zone (e.g. 1015 for zone 2) and makes the
+    appliance reject the write. This fixture exposes a CH zone ``circb1`` at zone id 2
+    (offset 512), so the regression only passes when the write lands on register 503.
+    """
+
+    forced_cooling_address = MetaRegisters.COOLING_FORCED.start_address
+
+    api = get_api(mock_modbus_client=mock_modbus_client)
+    with patch(
+        "aio_remeha_modbus.api.api.RemehaApi.create",
+        new=lambda *args, **kwargs: api,
+    ):
+        await setup_platform(hass=hass, config_entry=mock_config_entry)
+        await hass.async_block_till_done()
+
+        circb1 = hass.states.get(entity_id="climate.remeha_modbus_test_hub_circb1")
+        assert circb1 is not None
+        assert circb1.state == HVACMode.HEAT_COOL
+
+        # AP015 (forced cooling) starts out disabled.
+        before = await mock_modbus_client.read_holding_registers(
+            address=forced_cooling_address, count=1
+        )
+        assert before.registers[0] == 0
+
+        await hass.services.async_call(
+            domain=ClimateDomain,
+            service="set_hvac_mode",
+            service_data={
+                "entity_id": circb1.entity_id,
+                "hvac_mode": HVACMode.COOL,
+            },
+            blocking=True,
+        )
+
+        # The forced-cooling flag must land on the appliance register itself, not 503 + 512.
+        after = await mock_modbus_client.read_holding_registers(
+            address=forced_cooling_address, count=1
+        )
+        assert after.registers[0] == 1
 
 
 @pytest.mark.parametrize("mock_modbus_client", ["modbus_store.json"], indirect=True)
