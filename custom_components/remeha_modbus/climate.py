@@ -544,10 +544,12 @@ class RemehaChEntity(RemehaClimateEntity):
             await self.api.async_write_variable(
                 variable=ZoneRegisters.MODE, value=ClimateZoneMode.MANUAL, offset=zone_offset
             )
+            # COOLING_FORCED (AP015) is an appliance-wide register and must be written
+            # without a zone offset. Adding the offset targets 503 + offset, which is an
+            # invalid address for any non-primary zone (e.g. 1015 for zone 2).
             await self.api.async_write_variable(
                 variable=MetaRegisters.COOLING_FORCED,
                 value=bool(hvac_mode == HVACMode.COOL),
-                offset=zone_offset,
             )
             zone.mode = ClimateZoneMode.MANUAL
         elif hvac_mode == HVACMode.OFF:
