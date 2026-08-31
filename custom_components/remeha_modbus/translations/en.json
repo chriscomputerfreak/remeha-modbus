@@ -50,6 +50,18 @@
           "auto_schedule": "Set up automatic DHW scheduling"
         }
       },
+      "reconfigure": {
+        "data": {
+          "slave": "Modbus address",
+          "type": "Connection type",
+          "auto_schedule": "DHW scheduling"
+        },
+        "data_description": {
+          "slave": "The GTW-08 modbus address",
+          "type": "The type of modbus connection.",
+          "auto_schedule": "Set up automatic DHW scheduling"
+        }
+      },
       "auto_scheduling": {
         "title": "Auto scheduling configuration",
         "description": "Select a weather entity and provide PV system configuration.",
@@ -97,13 +109,36 @@
     }
   },
   "selector": {
-    "select_default_auto_schedule_id": {
+    "schedule_id": {
       "options": {
         "schedule_1": "Schedule 1",
         "schedule_2": "Schedule 2",
-        "schedule_3": "Schedule 3"
+        "schedule_3": "Schedule 3",
+        "schedule_4": "Cooling schedule"
       }
-    }
+    },
+    "weekday": {
+      "options": {
+        "mon": "Monday",
+        "tue": "Tuesday",
+        "wed": "Wednesday",
+        "thu": "Thursday",
+        "fri": "Friday",
+        "sat": "Saturday",
+        "sun": "Sunday"
+      }
+    },
+    "modbus_type": {
+      "options": {
+        "tcp": "TCP",
+        "udp": "UDP",
+        "rtuovertcp": "RTU over TCP",
+        "serial": "Serial"
+      }
+    },
+    "modbus_register": {},
+    "register_count": {},
+    "struct_format": {}
   },
   "entity": {
     "climate": {
@@ -117,29 +152,181 @@
               "manual": "Manual",
               "schedule_1": "Schedule 1",
               "schedule_2": "Schedule 2",
-              "schedule_3": "Schedule 3"
+              "schedule_3": "Schedule 3",
+              "schedule_4": "Cooling schedule"
             }
           }
+        }
+      }
+    },
+    "select": {
+      "appliance_silent_mode": {
+        "name": "Appliance silent mode",
+        "state": {
+          "off": "Off",
+          "level_1": "Level 1",
+          "level_2": "Level 2"
+        }
+      }
+    },
+    "switch": {
+      "enable_schedule_sync": {
+        "name": "Schedule synchronization"
+      },
+      "heatpump_managed_schedules": {
+        "name": "Heatpump manages time schedule execution."
+      }
+    },
+    "time": {
+      "silent_mode_start_time": {
+        "name": "Silent mode start time"
+      },
+      "silent_mode_end_time": {
+        "name": "Silent mode end time"
+      }
+    },
+    "sensor": {
+      "season_mode": {
+        "name": "Season",
+        "state": {
+          "winter": "Winter",
+          "frost_protection": "Frost protection",
+          "transition_season": "Transition season",
+          "summer": "Summer"
+        }
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "standby": "Standby",
+          "heat_demand": "Heat demand",
+          "generator_start": "Generator start",
+          "generator_heating": "Generator heating",
+          "generator_dhw": "Generator DHW",
+          "generator_stop": "Generator stop",
+          "pump_post_run": "Pump post-run",
+          "cooling": "Cooling",
+          "controlled_shutdown": "Controlled shutdown",
+          "start_prevention": "Start prevention",
+          "locking_mode": "Locking mode",
+          "load_test_min": "Load test min.",
+          "load_test_heating_max": "Load test heating max.",
+          "load_test_dhw_max": "Load test DHW max.",
+          "manual_heat_demand": "Manual heat demand",
+          "frost_protection": "Frost protection",
+          "venting": "Venting",
+          "control_unit_cooling": "Control unit cooling",
+          "resetting": "Resetting",
+          "automatic_filling": "Automatic filling",
+          "stopped": "Stopped",
+          "calibration": "Calibration",
+          "factory_test": "Factory test",
+          "hydraulic_balancing": "Hydraulic balancing",
+          "device_mode": "Device mode",
+          "unknown": "Unknown"
+        }
+      },
+      "substatus": {
+        "name": "Substatus",
+        "state": {
+          "standby": "Standby",
+          "pause_time": "Pause time / short-cycle protection",
+          "close_hydraulic_valve": "Closing hydraulic valve",
+          "stop_pump": "Stopping pump",
+          "wait_start_release": "Waiting for start release",
+          "generator_starting": "Generator starting",
+          "internal_setpoint": "Internal setpoint",
+          "limited_internal_setpoint": "Limited internal setpoint",
+          "power_controlled": "Power controlled",
+          "pump_post_run": "Pump post-run",
+          "start_pump": "Starting pump",
+          "start_pause_time": "Starting pause time",
+          "compressor_unloaded": "Compressor unloaded",
+          "hp_tmax_backup_on": "HP Tmax backup on",
+          "outside_temp_limit_hp_off": "Outside temperature limit HP off",
+          "hp_stop_by_hybrid": "HP stop by hybrid",
+          "defrost_with_heat_pump": "Defrost with heat pump",
+          "defrost_with_backup": "Defrost with backup generator",
+          "defrost_hp_and_backup": "Defrost HP + backup",
+          "hp_flow_above_tmax": "HP flow above Tmax",
+          "hp_off_high_humidity": "HP off due to high humidity",
+          "hp_off_flow": "HP off due to flow",
+          "generator_unloaded": "Generator unloaded",
+          "hp_unloaded_cooling": "HP unloaded (cooling)",
+          "hp_stop_outside_temp": "HP stop (outside temperature)",
+          "hp_off_flow_tmax": "HP off (flow Tmax)",
+          "bl_backup_off": "Blocking: backup generator off",
+          "bl_heat_pump_off": "Blocking: heat pump off",
+          "bl_hp_and_backup_off": "Blocking: HP and backup off",
+          "low_tariff": "Low tariff",
+          "pv_with_heat_pump": "PV with heat pump",
+          "pv_hp_and_backup": "PV: HP and backup",
+          "smart_grid": "Smart grid",
+          "wait_water_pressure": "Waiting for water pressure",
+          "no_generator_available": "No generator available",
+          "free_cooling_pump_off": "Free cooling, pump off",
+          "free_cooling_pump_on": "Free cooling, pump on",
+          "blocking_active": "Blocking active",
+          "warming_up": "Warming up",
+          "curative_defrost": "Curative defrost",
+          "preventive_defrost": "Preventive defrost",
+          "init_completed": "Initialization completed",
+          "init_csu": "Initialization CSU",
+          "init_identification": "Initialization identification",
+          "init_blocking_parameters": "Initialization blocking parameters",
+          "init_safety_unit": "Initialization safety unit",
+          "init_blocking": "Initialization blocking",
+          "unknown": "Unknown",
+          "safety_shutdown": "Safety shutdown / reset wait time"
         }
       }
     }
   },
   "services": {
+    "bootstrap_blenders": {
+      "name": "Bootstrap blenders",
+      "description": "Bootstrap connections with other integrations. Calling this multiple times has no additional effect."
+    },
+    "create_default_zone_schema": {
+      "name": "Create a default zone schedule",
+      "description": "Create a default zone schedule for the given schedule and day.",
+      "fields": {
+        "schedule_id": {
+          "name": "Select the schedule to use"
+        },
+        "weekday": {
+          "name": "Select the weekday to apply the schedule to"
+        }
+      }
+    },
     "dhw_auto_schedule": {
       "name": "DHW auto scheduling",
       "description": "Create a DHW schedule for the next day based on weather forecast and boiler/solar configuration. Requires a weather integration that provides solar irradiance (GHI) in hourly forecasts."
+    },
+    "force_system_rediscovery": {
+      "name": "Force system rediscovery",
+      "description": "Force your Remeha appliance to rediscover device- and zone metadata. A restart of Home Assistant is required after running this service."
+    },
+    "read_registers": {
+      "name": "Read modbus registers",
+      "description": "Read a list of consecutive modbus registers from the GTW-08",
+      "fields": {
+        "start_register": {
+          "name": "Start register",
+          "description": "The first register to read"
+        },
+        "register_count": {
+          "name": "Register count",
+          "description": "The amount of registers to read"
+        },
+        "struct_format": {
+          "name": "Struct format",
+          "description": "The struct format, following the [python3 struct format]({python_struct_format_docs_url})."
+        }
+      }
     }
   },
   "exceptions": {
-    "climate_invalid_operation_ctx": {
-      "message": "Requested operation {operation} is invalid in preset mode {preset_mode}."
-    },
-    "climate_invalid_operation_ctx_hvac": {
-      "message": "Setting HVAC mode to {hvac_mode} is unsupported for zone {zone_name}."
-    },
-    "climate_unsupported_preset_mode": {
-      "message": "Requested preset mode {preset_mode} is unsupported."
-    },
     "auto_schedule_unsupported_temperature_unit": {
       "message": "Entity {entity_id} uses an unsupported temperature unit {unit_of_temperature}."
     },
@@ -160,6 +347,118 @@
     },
     "auto_schedule_value_error": {
       "message": "Cannot auto schedule: error while deserializing modbus response, see logs for details."
+    },
+    "bootstrap_blenders_error": {
+      "message": "Error while setting up links with other integrations."
+    },
+    "climate_invalid_operation_ctx": {
+      "message": "Requested operation {operation} is invalid in preset mode {preset_mode}."
+    },
+    "climate_invalid_operation_ctx_hvac": {
+      "message": "Setting HVAC mode to {hvac_mode} is unsupported for zone {zone_name}."
+    },
+    "climate_unsupported_preset_mode": {
+      "message": "Requested preset mode {preset_mode} is unsupported."
+    },
+    "config_entry_error_connection_type": {
+      "message": "{connection_type} is not a valid connection type. Use one of [{connection_types}]"
+    },
+    "config_entry_key_error": {
+      "message": "Invalid configuration: key {key} is invalid or missing."
+    },
+    "incorrect_entity_platform": {
+      "message": "Entity {entity_id} doesn't belong to the expected platform {expected_platform} and/or the integration {expected_component}."
+    },
+    "missing_external_component": {
+      "message": "Missing external component {component}. Please install it and retry; installation instructions are at {url}."
+    },
+    "parse_error_entity_not_found": {
+      "message": "Cannot parse ZoneSchedule into scheduler schedule: The required climate entity cannot be found."
+    },
+    "parse_error_multiple_weekdays": {
+      "message": "Cannot parse state {schedule_entity_id} into ZoneSchedule: schedule is for multiple weekdays but require exactly one."
+    },
+    "parse_error_scheduler_state_action": {
+      "message": "Cannot parse state {schedule_entity_id} into ZoneSchedule: missing required service call to set preset mode."
+    },
+    "parse_error_time_slot": {
+      "message": "Cannot parse state {schedule_entity_id} into ZoneSchedule: timeslot string {time_slot} must have exactly two parts, but got {part_count}."
+    },
+    "read_registers_modbus_error": {
+      "message": "Modbus error while reading registers."
+    },
+    "read_registers_illegal_struct_format": {
+      "message": "Cannot parse result: illegal struct format {struct_format}."
+    },
+    "read_registers_unknown_error": {
+      "message": "An unknown error occurred while reading modbus registers. See log for details."
+    },
+    "schedule_update_non_equal_climates": {
+      "message": "Cannot determine zone schedule updates: a climate zone has been added or removed."
+    },
+    "scenario_execution_error_missing_required_state": {
+      "message": "Cannot execute scenario {scenario}: missing required entity state from {component} integration."
+    },
+    "scenario_execution_error_missing_climate": {
+      "message": "Cannot execute scenario {scenario}: climate linked to scheduler.schedule {scheduler_entity} is missing."
+    },
+    "service_error_missing_state": {
+      "message": "Cannot process newly added entity {entity_id}: new state is unavailable."
+    },
+    "update_failed_discovery_table_corrupted": {
+      "message": "Modbus discovery table corrupted. Please visit your repairs dashboard to fix this."
+    },
+    "update_failed_invalid_zone_schedule": {
+      "message": "Failed to update: zone {zone} uses selected schedule {selected_schedule} which failed to decode. Please visit your repairs dashboard to fix this."
+    },
+    "update_failed_modbus_exception": {
+      "message": "Failed to update due to modbus exception: {modbus_message}"
+    }
+  },
+  "issues": {
+    "discovery_table_corrupted": {
+      "title": "Modbus discovery table corrupted",
+      "fix_flow": {
+        "step": {
+          "confirm_force_rediscovery": {
+            "title": "Force modbus discovery",
+            "description": "The GTW-08 discovery table seems to be corrupted. You can fix this by forcing its rediscovery and restarting Home Assistant. This does not affect the settings of your Remeha appliance."
+          }
+        }
+      }
+    },
+    "heatpump_managed_schedules_turned_off": {
+      "title": "Time schedules not managed by appliance",
+      "fix_flow": {
+        "step": {
+          "confirm_undo": {
+            "title": "Let appliance manage time schedules",
+            "description": "You turned off a switch which causes Home Assistant to manage time schedules directly instead of letting the Remeha appliance manage that. Click submit to revert this, or reboot Home Assistant to ignore this issue."
+          }
+        }
+      }
+    },
+    "invalid_zone_schedule": {
+      "title": "Invalid zone schedule",
+      "fix_flow": {
+        "step": {
+          "confirm_overwrite": {
+            "title": "Overwrite faulty schedule",
+            "description": "> [!WARNING]\n> A zone schedule failed to parse. To fix this issue, overwrite the faulty zone schedule with a default schedule that only uses the anti-frost/eco preset, depending on the zone type.\n\n> If you suspect this is a bug rather than a faulty zone schema, please report an issue [here]({issue_tracker_url})."
+          }
+        }
+      }
+    },
+    "restart_required_force_system_rediscovery": {
+      "title": "Restart required",
+      "fix_flow": {
+        "step": {
+          "confirm_restart": {
+            "title": "Restart required",
+            "description": "Your Remeha appliance has issued a system rediscovery, and a restart of Home Assistant is required. Click submit to restart now."
+          }
+        }
+      }
     }
   }
 }

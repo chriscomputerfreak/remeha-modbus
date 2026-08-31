@@ -1,9 +1,19 @@
 """Constants for the Remeha Modbus integration."""
 
+from collections.abc import Callable
 from datetime import date
 from enum import Enum, StrEnum
-from typing import Final, Self
+from typing import Final, Literal, NamedTuple
 
+import voluptuous as vol
+from aio_remeha_modbus.api.const import (
+    ClimateZoneMode,
+    ClimateZoneScheduleId,
+    HybridRegisters,
+    MetaRegisters,
+    ModbusVariableDescription,
+    Weekday,
+)
 from homeassistant.components.climate.const import (
     PRESET_COMFORT,
     PRESET_ECO,
@@ -14,14 +24,64 @@ from homeassistant.components.sensor import (
     SensorEntityDescription,
     SensorStateClass,
 )
-from pydantic import Field, model_validator
+from homeassistant.core import Event, EventStateChangedData
+from homeassistant.helpers import config_validation as cv
 from pydantic.dataclasses import dataclass
 
+from custom_components.remeha_modbus.helpers import validation as remeha_cv
+
 DOMAIN: Final[str] = "remeha_modbus"
+ISSUE_TRACKER_URL: Final[str] = "https://github.com/houthacker/remeha-modbus/issues"
 
 # Versioning for the config flow.
 HA_CONFIG_VERSION = 1
 HA_CONFIG_MINOR_VERSION = 2
+
+# Versioning for the json storage
+STORAGE_MAJOR_VERSION = 1
+STORAGE_MINOR_VERSION = 0
+STORAGE_FILE_KEY = f"{DOMAIN}.storage"
+STORAGE_RUNTIME_KEY = f"{DOMAIN}_storage"
+
+type EntityEventCallback = Callable[[Event[EventStateChangedData]], None]
+
+SWITCH_SCHEDULE_SYNC: Final[str] = "enable_schedule_sync"
+"""Entity name of the switch that determines whether schedules are synchronized.
+
+Enabling this requires the user to have installed the `scheduler-card` and `scheduler-component`
+integrations.
+"""
+
+HEATPUMP_MANAGED_SCHEDULES: Final[str] = "heatpump_managed_schedules"
+"""Entity name of the switch that determines whether time schedule execution is managed by the heat pump (True) or HA (False).
+
+The recommended setting is 'on', as to have the heat pump manage time schedule execution.
+"""
+
+TIME_SILENT_MODE_START_TIME: Final[str] = "silent_mode_start_time"
+"""Entity name of the time entity that configures when the appliance silent mode starts."""
+
+TIME_SILENT_MODE_END_TIME: Final[str] = "silent_mode_end_time"
+"""Entity name of the time entity that configures when the appliance silent mode ends."""
+
+ISSUE_CONFIG_ENTRY_CONNECTION_TYPE: Final[str] = "config_entry_error_connection_type"
+
+ISSUE_CONFIG_ENTRY_KEY_ERROR: Final[str] = "config_entry_key_error"
+
+ISSUE_HEATPUMP_MANAGED_SCHEDULES_OFF: Final[str] = "heatpump_managed_schedules_off"
+
+ISSUE_HEATPUMP_MANAGED_SCHEDULES_LEARN_MORE_URL: Final[str] = (
+    "https://github.com/houthacker/remeha-modbus#heatpump-managed-schedules"
+)
+
+ISSUE_INVALID_ZONE_SCHEDULE: Final[str] = "invalid_zone_schedule"
+
+ISSUE_DISCOVERY_TABLE_CORRUPTED: Final[str] = "modbus_discovery_table_corrupted"
+ISSUE_DISCOVERY_TABLE_CORRUPTED_LEARN_MORE_URL: Final[str] = (
+    "https://github.com/houthacker/remeha-modbus#modbus-discovery-table"
+)
+
+ISSUE_RESTART_REQUIRED_REDISCOVERY: Final[str] = "restart_required_force_system_rediscovery"
 
 MAXIMUM_NORMAL_SURFACE_IRRADIANCE_NL: Final[int] = 1000
 """The maximum normal surface irradiance in The Netherlands, in W/m²"""
@@ -51,6 +111,18 @@ PV_MIN_TILT_DEGREES: Final[int] = 10
 
 PV_MAX_TILT_DEGREES: Final[int] = 90
 """The maximum supported PV system tilt"""
+
+ATTR_ZONE_ID: Final[str] = "zone_id"
+"""Attribute in `climate` entities containing the related `ClimateZone` id."""
+
+ATTR_SCHEDULER_NAME: Final[str] = "name"
+"""Attribute in `switch` entities in the `scheduler` component where their name is stored."""
+
+ATTR_SCHEDULER_TAGS: Final[str] = "tags"
+"""Attribute in `switch` entities in the `scheduler` component where tags are stored."""
+
+type UnsubscribeCallback = Callable[[], None]
+"""A type shorthand for a no-arg callable returning None."""
 
 
 # DHW auto scheduling
@@ -304,32 +376,6 @@ class PVSystem:
     """The installation date """
 
 
-@dataclass(frozen=True)
-class BoilerConfiguration:
-    """The configuration of a DHW boiler."""
-
-    volume: Final[float | None]
-    """The volume of the boiler in m³"""
-
-    heat_loss_rate: Final[float | None]
-    """The heat loss rate in Watt"""
-
-    energy_label: Final[BoilerEnergyLabel | None]
-    """The boiler energy label, if the heat loss rate is not available."""
-
-
-class Weekday(Enum):
-    """Enumeration for days of the week."""
-
-    MONDAY = 0
-    TUESDAY = 1
-    WEDNESDAY = 2
-    THURSDAY = 3
-    FRIDAY = 4
-    SATURDAY = 5
-    SUNDAY = 6
-
-
 class ClimateZoneType(Enum):
     """Enumerates the available zone types."""
 
@@ -367,24 +413,12 @@ class ClimateZoneFunction(Enum):
             ClimateZoneFunction.DHW_PRIMARY,
         ]
 
-
-class ClimateZoneMode(Enum):
-    """Enumerates the modes a zone can be in."""
-
-    SCHEDULING = 0
-    MANUAL = 1
-    ANTI_FROST = 2
-
-
-class ClimateZoneScheduleId(Enum):
-    """The climate zone time program selected by the user.
-
-    Note: After updating the enum values, **ALWAYS** update the mapping to _attr_preset_modes of RemehaModbusClimateEntity!
-    """
-
-    SCHEDULE_1 = 0
-    SCHEDULE_2 = 1
-    SCHEDULE_3 = 2
+    def has_cooling_capability(self) -> bool:
+        """Return whether this `ClimateZoneFunction` supports cooling."""
+        return self in [
+            ClimateZoneFunction.MIXING_CIRCUIT,
+            ClimateZoneFunction.FAN_CONVECTOR,
+        ]
 
 
 class ClimateZoneHeatingMode(Enum):
@@ -395,10 +429,58 @@ class ClimateZoneHeatingMode(Enum):
     COOLING = 2
 
 
+class ZoneScheduleUID(NamedTuple):
+    """A key class to uniquely identify a climate zone schedule."""
+
+    zone_id: int
+
+    schedule_id: ClimateZoneScheduleId
+
+    weekday: Weekday
+
+    def __str__(self):
+        """Return a string representation of this object."""
+        return f"{self.zone_id}.{self.schedule_id}.{self.weekday.name}"
+
+
+WEEKDAY_TO_SHORT_DESC: Final[
+    dict[Weekday, Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"]]
+] = {
+    Weekday.MONDAY: "mon",
+    Weekday.TUESDAY: "tue",
+    Weekday.WEDNESDAY: "wed",
+    Weekday.THURSDAY: "thu",
+    Weekday.FRIDAY: "fri",
+    Weekday.SATURDAY: "sat",
+    Weekday.SUNDAY: "sun",
+}
+
+SHORT_DESC_TO_WEEKDAY: Final[
+    dict[Literal["mon", "tue", "wed", "thu", "fri", "sat", "sun"], Weekday]
+] = {WEEKDAY_TO_SHORT_DESC[day]: day for day in Weekday}
+
 CONFIG_AUTO_SCHEDULE: Final[str] = "auto_schedule"
 
-# Keep in sync with services.yaml service name.
-AUTO_SCHEDULE_SERVICE_NAME: Final[str] = "dhw_auto_schedule"
+### Service names. Keep in sync with services.yaml service name. ###
+SERVICE_BOOTSTRAP_BLENDERS: Final[str] = "bootstrap_blenders"
+SERVICE_READ_REGISTERS: Final[str] = "read_registers"
+SERVICE_AUTO_SCHEDULE: Final[str] = "dhw_auto_schedule"
+SERVICE_FORCE_SYSTEM_REDISCOVERY: Final[str] = "force_system_rediscovery"
+
+### Service fields
+READ_REGISTERS_START_REGISTER: Final[str] = "start_register"
+READ_REGISTERS_REGISTER_COUNT: Final[str] = "register_count"
+READ_REGISTERS_STRUCT_FORMAT: Final[str] = "struct_format"
+
+### Service schemes
+READ_REGISTERS_SERVICE_SCHEMA: vol.Schema = vol.Schema(
+    {
+        vol.Required(READ_REGISTERS_START_REGISTER): cv.positive_int,
+        vol.Required(READ_REGISTERS_REGISTER_COUNT, default=1): cv.positive_int,
+        vol.Required(READ_REGISTERS_STRUCT_FORMAT, default="=H"): remeha_cv.struct_format,
+    }
+)
+
 
 AUTO_SCHEDULE_DEFAULT_ID: Final[ClimateZoneScheduleId] = ClimateZoneScheduleId.SCHEDULE_1
 """The default schedule id for auto scheduling."""
@@ -462,12 +544,15 @@ TEMPERATURE_STEP: float = 0.5
 REMEHA_PRESET_SCHEDULE_1: Final[str] = "schedule_1"
 REMEHA_PRESET_SCHEDULE_2: Final[str] = "schedule_2"
 REMEHA_PRESET_SCHEDULE_3: Final[str] = "schedule_3"
+REMEHA_PRESET_SCHEDULE_4: Final[str] = "schedule_4"
+
 HA_PRESET_MANUAL: Final[str] = "manual"
 HA_PRESET_ANTI_FROST: Final[str] = "anti_frost"
-CLIMATE_DEFAULT_PRESETS: Final[list[str]] = [
+CLIMATE_SCHEDULING_PRESETS: Final[list[str]] = [
     REMEHA_PRESET_SCHEDULE_1,
     REMEHA_PRESET_SCHEDULE_2,
     REMEHA_PRESET_SCHEDULE_3,
+    REMEHA_PRESET_SCHEDULE_4,
 ]
 
 # Additional presets available on DHW zones
@@ -477,6 +562,14 @@ HA_SCHEDULE_TO_REMEHA_SCHEDULE: Final[dict[str, ClimateZoneScheduleId]] = {
     REMEHA_PRESET_SCHEDULE_1: ClimateZoneScheduleId.SCHEDULE_1,
     REMEHA_PRESET_SCHEDULE_2: ClimateZoneScheduleId.SCHEDULE_2,
     REMEHA_PRESET_SCHEDULE_3: ClimateZoneScheduleId.SCHEDULE_3,
+    REMEHA_PRESET_SCHEDULE_4: ClimateZoneScheduleId.SCHEDULE_4,
+}
+
+HA_CLIMATE_PRESET_TO_REMEHA_ZONE_MODE: Final[dict[str, ClimateZoneMode]] = {
+    HA_PRESET_ANTI_FROST: ClimateZoneMode.ANTI_FROST,
+    HA_PRESET_MANUAL: ClimateZoneMode.MANUAL,
+    PRESET_COMFORT: ClimateZoneMode.MANUAL,
+    PRESET_ECO: ClimateZoneMode.ANTI_FROST,
 }
 
 
@@ -545,371 +638,102 @@ REMEHA_DEVICE_INSTANCE_RESERVED_REGISTERS: Final[int] = 6
 REMEHA_TIME_PROGRAM_RESERVED_REGISTERS: Final[int] = 70
 REMEHA_TIME_PROGRAM_BYTE_SIZE: Final[int] = 20
 REMEHA_TIME_PROGRAM_SLOT_SIZE: Final[int] = 3
-REMEHA_TIME_PROGRAM_TIME_STEP_MINUTES: Final[int] = 10
+REMEHA_TIME_STEP_MINUTES: Final[int] = 10
 
-# Reference to Remeha modbus registers
-type ModbusVariableRef = int
+# Option keys for the ENUM status sensors. The human-readable values are provided
+# as translations (see the `entity.sensor` section in the translation files).
+SEASON_MODE_OPTIONS: Final[dict[int, str]] = {
+    0: "winter",
+    1: "frost_protection",
+    2: "transition_season",
+    3: "summer",
+}
 
+STATUS_OPTIONS: Final[dict[int, str]] = {
+    0: "standby",
+    1: "heat_demand",
+    2: "generator_start",
+    3: "generator_heating",
+    4: "generator_dhw",
+    5: "generator_stop",
+    6: "pump_post_run",
+    7: "cooling",
+    8: "controlled_shutdown",
+    9: "start_prevention",
+    10: "locking_mode",
+    11: "load_test_min",
+    12: "load_test_heating_max",
+    13: "load_test_dhw_max",
+    15: "manual_heat_demand",
+    16: "frost_protection",
+    17: "venting",
+    18: "control_unit_cooling",
+    19: "resetting",
+    20: "automatic_filling",
+    21: "stopped",
+    22: "calibration",
+    23: "factory_test",
+    24: "hydraulic_balancing",
+    200: "device_mode",
+    254: "unknown",
+}
 
-@dataclass(unsafe_hash=True)
-class ModbusVariableDescription:
-    """Modbus register description.
+SUBSTATUS_OPTIONS: Final[dict[int, str]] = {
+    0: "standby",
+    1: "pause_time",
+    2: "close_hydraulic_valve",
+    3: "stop_pump",
+    4: "wait_start_release",
+    21: "generator_starting",
+    30: "internal_setpoint",
+    31: "limited_internal_setpoint",
+    32: "power_controlled",
+    60: "pump_post_run",
+    61: "start_pump",
+    63: "start_pause_time",
+    65: "compressor_unloaded",
+    66: "hp_tmax_backup_on",
+    67: "outside_temp_limit_hp_off",
+    68: "hp_stop_by_hybrid",
+    69: "defrost_with_heat_pump",
+    70: "defrost_with_backup",
+    71: "defrost_hp_and_backup",
+    73: "hp_flow_above_tmax",
+    75: "hp_off_high_humidity",
+    76: "hp_off_flow",
+    79: "generator_unloaded",
+    80: "hp_unloaded_cooling",
+    81: "hp_stop_outside_temp",
+    82: "hp_off_flow_tmax",
+    88: "bl_backup_off",
+    89: "bl_heat_pump_off",
+    90: "bl_hp_and_backup_off",
+    91: "low_tariff",
+    92: "pv_with_heat_pump",
+    93: "pv_hp_and_backup",
+    94: "smart_grid",
+    95: "wait_water_pressure",
+    96: "no_generator_available",
+    102: "free_cooling_pump_off",
+    103: "free_cooling_pump_on",
+    106: "blocking_active",
+    107: "warming_up",
+    108: "curative_defrost",
+    109: "preventive_defrost",
+    200: "init_completed",
+    201: "init_csu",
+    202: "init_identification",
+    203: "init_blocking_parameters",
+    204: "init_safety_unit",
+    205: "init_blocking",
+    254: "unknown",
+    255: "safety_shutdown",
+}
 
-    Attributes:
-        start_address (ModbusRegisterRef): The register index as specified in the GTW-08 parameter list.
-        name (str): The name as shown in the 'Data' field in the GTW-08 parameter list.
-        data_type (DataType): The data type of the variable.
-        scale (float): Multiply the 'raw' variable value by this.
-        count (int): The amount of registers to read/write. Required, and calculated for all types except `DataType.STRING`.
-        friendly_name (str | None): The optional parameter name as shown in the Remeha installation manual of the appliance.
-
-    """
-
-    start_address: ModbusVariableRef
-    name: str
-    data_type: DataType
-    scale: float | None = Field(default=None)
-    count: int | None = Field(default=None)
-    friendly_name: str | None = Field(default=None)
-
-    @model_validator(mode="after")
-    def ensure_mandatory_fields(self) -> Self:
-        """Ensure the fields `count` and `struct_format` have a value when they are required.
-
-        Additionally, if `count` has no value, it is calculated for data types other than `DataType.STRING`.
-
-        * `count` is required if `data_type == DataType.STRING`
-        * `scale` must be `None` if `data_type == DataType.TUPLE16`
-
-        """
-
-        def ensure_register_count() -> int:
-            match self.data_type:
-                case DataType.UINT8 | DataType.UINT16 | DataType.INT16 | DataType.TUPLE16:
-                    return 1
-                case DataType.UINT32 | DataType.INT32 | DataType.FLOAT32:
-                    return 2
-                case DataType.CIA_301_TIME_OF_DAY:
-                    return 3
-                case DataType.UINT64 | DataType.INT64 | DataType.FLOAT64:
-                    return 4
-                case DataType.ZONE_TIME_PROGRAM:
-                    return 10
-                case _:
-                    # Raise an error if self.count cannot be calculated.
-                    raise ValueError(
-                        f"Cannot calculate amount of registers required for {self.data_type}"
-                    )
-
-        if self.data_type == DataType.STRING and self.count is None:
-            raise ValueError(
-                "Attribute self.count has no value, but it is required because data_type is DataType.STRING"
-            )
-
-        if self.data_type == DataType.TUPLE16 and self.scale is not None:
-            raise ValueError(
-                "self.scale has a value, but self.data_type is DataType.TUPLE16, which cannot be scaled."
-            )
-
-        self.count = ensure_register_count() if self.count is None else self.count
-
-
-class MetaRegisters:
-    """Register mappings for meta data."""
-
-    NUMBER_OF_DEVICES: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=128,
-        name="numberOfDevices",
-        data_type=DataType.UINT8,
-    )
-    NUMBER_OF_ZONES: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=189, name="NumberOfZones", data_type=DataType.UINT8
-    )
-
-    OUTSIDE_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=384, name="varApTOutside", data_type=DataType.INT16, scale=0.01
-    )
-
-    SEASON_MODE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=385, name="varApSeasonMode", data_type=DataType.UINT8
-    )
-
-    CURRENT_ERROR: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=277, name="applianceCurrentError", data_type=DataType.UINT16
-    )
-
-    ERROR_PRIORITY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=278, name="applianceErrorPriority", data_type=DataType.INT16
-    )
-
-    APPLIANCE_STATUS_1: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=279, name="applilanceStatus1", data_type=DataType.UINT8
-    )
-
-    APPLIANCE_STATUS_2: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=280, name="applilanceStatus2", data_type=DataType.UINT8
-    )
-
-    FLOW_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=400, name="varApTFlow", data_type=DataType.INT16, scale=0.01
-    )
-
-    RETURN_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=401, name="varApTReturn", data_type=DataType.INT16, scale=0.01
-    )
-
-    HEAT_PUMP_FLOW_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=403, name="varHpHeatPumpTF", data_type=DataType.INT16, scale=0.01
-    )
-
-    HEAT_PUMP_RETURN_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=404, name="varHpHeatPumpTR", data_type=DataType.INT16, scale=0.01
-    )
-
-    WATER_PRESSURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=409, name="varApWaterPressure", data_type=DataType.UINT8, scale=0.1
-    )
-
-    FLOW_METER: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=410, name="varApFlowmeter", data_type=DataType.UINT16, scale=0.01
-    )
-
-    STATUS: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=411, name="varApStatus", data_type=DataType.UINT8
-    )
-
-    SUBSTATUS: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=412, name="varApSubStatus", data_type=DataType.UINT8
-    )
-
-    POWER_ACTUAL: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=413, name="varApPowerActual", data_type=DataType.UINT16, scale=0.01
-    )
-
-    TOTAL_ENERGY_CONSUMPTION: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=439, name="varApTotalEnergyConsumption", data_type=DataType.UINT32
-    )
-
-    TOTAL_ENERGY_DELIVERY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=443, name="varApTotalEnergyDelivery", data_type=DataType.UINT32
-    )
-
-    CH_ENERGY_DELIVERY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=445, name="varApChEnergyDelivery", data_type=DataType.UINT32
-    )
-
-    DHW_ENERGY_DELIVERY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=447, name="varApDhwEnergyDelivery", data_type=DataType.UINT32
-    )
-
-    COOLING_ENERGY_DELIVERY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=449, name="varApCoolingEnergyDelivery", data_type=DataType.UINT32
-    )
-
-    BACKUP_ENERGY_DELIVERY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=451, name="varApBackupEnergyDelivery", data_type=DataType.UINT32
-    )
-
-    PUMP_SPEED: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=459, name="varApPumpSpeed", data_type=DataType.UINT16, scale=0.01
-    )
-
-    ACTUAL_PRODUCED_POWER: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=460, name="varApActualProducerPower", data_type=DataType.UINT32, scale=0.01
-    )
-
-    # This variable exists on the appliance level. In the Remeha Home app however, this variable
-    # is configurable in two places: in the CH zone and at the system level. Change one, change
-    # the other too.
-    # In this integration, this value is shown in all CH climates and can be set as follows:
-    # * To force cooling, set HVACMode to COOL
-    # * To let the system decide to cool or heat, set HVACMode to HEAT_COOL
-    COOLING_FORCED: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=503, name="parApCoolingForced", data_type=DataType.UINT8
-    )
-
-
-class DeviceInstanceRegisters:
-    """The register mappings for device instances."""
-
-    TYPE_BOARD: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=129,
-        name="DeviceTypeBoard",
-        data_type=DataType.TUPLE16,
-    )
-    SW_VERSION: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=130,
-        name="sw_version",
-        data_type=DataType.TUPLE16,
-    )
-    HW_VERSION: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=132,
-        name="hw_version",
-        data_type=DataType.TUPLE16,
-    )
-    ARTICLE_NUMBER: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=133, name="ArticleNumber", data_type=DataType.UINT32
-    )
-
-
-class ZoneRegisters:
-    """The register mappings for a climate zone."""
-
-    TYPE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=640,
-        name="varZoneType",
-        data_type=DataType.UINT8,
-    )
-    FUNCTION: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=641,
-        name="parZoneFunction",
-        data_type=DataType.UINT8,
-        friendly_name="CP020",
-    )
-    SHORT_NAME: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=642,
-        name="parZoneFriendlyNameShort",
-        data_type=DataType.STRING,
-        count=3,
-    )
-    OWNING_DEVICE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=646,
-        name="instance",
-        data_type=DataType.UINT8,
-    )
-    MODE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=649,
-        name="parZoneMode",
-        data_type=DataType.UINT8,
-        friendly_name="CP320",
-    )
-    TEMPORARY_SETPOINT: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=663,
-        name="parZoneTemporaryRoomSetpoint",
-        data_type=DataType.UINT16,
-        scale=0.1,
-        friendly_name="CP510",
-    )
-    ROOM_MANUAL_SETPOINT: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=664,
-        name="parZoneRoomManualSetpoint",
-        data_type=DataType.UINT16,
-        scale=0.1,
-        friendly_name="CP200",
-    )
-    DHW_COMFORT_SETPOINT: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=665,
-        name="parZoneDhwComfortSetpoint",
-        data_type=DataType.UINT16,
-        scale=0.01,
-        friendly_name="CP350",
-    )
-    DHW_REDUCED_SETPOINT: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=666,
-        name="parZoneDhwReducedSetpoint",
-        data_type=DataType.UINT16,
-        scale=0.01,
-        friendly_name="CP360",
-    )
-    DHW_CALORIFIER_HYSTERESIS: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=686,
-        # It's actually Hysteresis (with an e), but since the parameter list defines it
-        # as Hysterisis, we'll conform to their naming.
-        name="parZoneDhwCalorifierHysterisis",
-        data_type=DataType.UINT16,
-        scale=0.01,
-        friendly_name="CP420",
-    )
-    SELECTED_TIME_PROGRAM: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=688,
-        name="parZoneTimeProgramSelected",
-        data_type=DataType.UINT8,
-        friendly_name="CP570",
-    )
-    TIME_PROGRAM_MONDAY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=689,
-        name="parZoneTimeProgramMonday",
-        data_type=DataType.ZONE_TIME_PROGRAM,
-    )
-    TIME_PROGRAM_TUESDAY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=699,
-        name="parZoneTimeProgramTuesday",
-        data_type=DataType.ZONE_TIME_PROGRAM,
-    )
-    TIME_PROGRAM_WEDNESDAY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=709,
-        name="parZoneTimeProgramWednesday",
-        data_type=DataType.ZONE_TIME_PROGRAM,
-    )
-    TIME_PROGRAM_THURSDAY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=719,
-        name="parZoneTimeProgramThursday",
-        data_type=DataType.ZONE_TIME_PROGRAM,
-    )
-    TIME_PROGRAM_FRIDAY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=729,
-        name="parZoneTimeProgramFriday",
-        data_type=DataType.ZONE_TIME_PROGRAM,
-    )
-    TIME_PROGRAM_SATURDAY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=739,
-        name="parZoneTimeProgramSaturday",
-        data_type=DataType.ZONE_TIME_PROGRAM,
-    )
-    TIME_PROGRAM_SUNDAY: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=749,
-        name="parZoneTimeProgramSunday",
-        data_type=DataType.ZONE_TIME_PROGRAM,
-    )
-    END_TIME_MODE_CHANGE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=978,
-        name="parZoneEndTimeModeChange",
-        data_type=DataType.CIA_301_TIME_OF_DAY,
-    )
-    CURRENT_ROOM_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=1104,
-        name="varZoneTRoom",
-        data_type=DataType.INT16,
-        scale=0.1,
-        friendly_name="CM030",
-    )
-    CURRENT_HEATING_MODE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=1109,
-        name="varZoneCurrentHeatingMode",
-        data_type=DataType.UINT8,
-        friendly_name="CM200",
-    )
-    PUMP_RUNNING: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=1110,
-        name="varZonePumpRunning",
-        data_type=DataType.UINT8,
-        friendly_name="CM050",
-    )
-    DHW_TANK_TEMPERATURE: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=1119,
-        name="varDhwTankTemperature",
-        data_type=DataType.INT16,
-        scale=0.01,
-        friendly_name="CM040",
-    )
-
-
-class HybridRegisters:
-    """Registers for hybrid applianceds."""
-
-    COP_CALCULATED: Final[ModbusVariableDescription] = ModbusVariableDescription(
-        start_address=9230, name="varHpCOPCalculated", data_type=DataType.UINT16, scale=0.001
-    )
-
-
-WEEKDAY_TO_MODBUS_VARIABLE: Final[dict[Weekday, ModbusVariableDescription]] = {
-    Weekday.MONDAY: ZoneRegisters.TIME_PROGRAM_MONDAY,
-    Weekday.TUESDAY: ZoneRegisters.TIME_PROGRAM_TUESDAY,
-    Weekday.WEDNESDAY: ZoneRegisters.TIME_PROGRAM_WEDNESDAY,
-    Weekday.THURSDAY: ZoneRegisters.TIME_PROGRAM_THURSDAY,
-    Weekday.FRIDAY: ZoneRegisters.TIME_PROGRAM_FRIDAY,
-    Weekday.SATURDAY: ZoneRegisters.TIME_PROGRAM_SATURDAY,
-    Weekday.SUNDAY: ZoneRegisters.TIME_PROGRAM_SUNDAY,
+REMEHA_ENUM_SENSOR_OPTIONS: Final[dict[ModbusVariableDescription, dict[int, str]]] = {
+    MetaRegisters.SEASON_MODE: SEASON_MODE_OPTIONS,
+    MetaRegisters.STATUS: STATUS_OPTIONS,
+    MetaRegisters.SUBSTATUS: SUBSTATUS_OPTIONS,
 }
 
 REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] = {
@@ -925,6 +749,13 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         name="outside_temperature",
         native_unit_of_measurement="°C",
         state_class=SensorStateClass.MEASUREMENT,
+    ),
+    MetaRegisters.SEASON_MODE: SensorEntityDescription(  # 385
+        key=MetaRegisters.SEASON_MODE.name,
+        name="season_mode",
+        translation_key="season_mode",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(SEASON_MODE_OPTIONS.values()),
     ),
     MetaRegisters.FLOW_TEMPERATURE: SensorEntityDescription(  # 400
         key=MetaRegisters.FLOW_TEMPERATURE.name,
@@ -969,10 +800,18 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         state_class=SensorStateClass.MEASUREMENT,
     ),
     MetaRegisters.STATUS: SensorEntityDescription(  # 411
-        key=MetaRegisters.STATUS.name, name="status"
+        key=MetaRegisters.STATUS.name,
+        name="status",
+        translation_key="status",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(STATUS_OPTIONS.values()),
     ),
     MetaRegisters.SUBSTATUS: SensorEntityDescription(  # 412
-        key=MetaRegisters.SUBSTATUS.name, name="substatus"
+        key=MetaRegisters.SUBSTATUS.name,
+        name="substatus",
+        translation_key="substatus",
+        device_class=SensorDeviceClass.ENUM,
+        options=list(SUBSTATUS_OPTIONS.values()),
     ),
     MetaRegisters.POWER_ACTUAL: SensorEntityDescription(  # 413
         key=MetaRegisters.POWER_ACTUAL.name,
@@ -980,6 +819,80 @@ REMEHA_SENSORS: Final[dict[ModbusVariableDescription, SensorEntityDescription]] 
         native_unit_of_measurement="%",
         device_class=SensorDeviceClass.POWER_FACTOR,
         state_class=SensorStateClass.MEASUREMENT,
+    ),
+    MetaRegisters.GENERATOR_STARTS_TOTAL: SensorEntityDescription(  # 419
+        key=MetaRegisters.GENERATOR_STARTS_TOTAL.name,
+        name="generator_starts_total",
+        native_unit_of_measurement="starts",
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.GENERATOR_HOURS_TOTAL: SensorEntityDescription(  # 421
+        key=MetaRegisters.GENERATOR_HOURS_TOTAL.name,
+        name="generator_hours_total",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP1_STARTS: SensorEntityDescription(  # 423
+        key=MetaRegisters.BACKUP1_STARTS.name,
+        name="backup1_starts",
+        native_unit_of_measurement="starts",
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP1_HOURS: SensorEntityDescription(  # 425
+        key=MetaRegisters.BACKUP1_HOURS.name,
+        name="backup1_hours",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP2_STARTS: SensorEntityDescription(  # 427
+        key=MetaRegisters.BACKUP2_STARTS.name,
+        name="backup2_starts",
+        native_unit_of_measurement="starts",
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP2_HOURS: SensorEntityDescription(  # 429
+        key=MetaRegisters.BACKUP2_HOURS.name,
+        name="backup2_hours",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.POWER_ON_HOURS: SensorEntityDescription(  # 431
+        key=MetaRegisters.POWER_ON_HOURS.name,
+        name="power_on_hours",
+        native_unit_of_measurement="h",
+        device_class=SensorDeviceClass.DURATION,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.CH_ENERGY_CONSUMPTION: SensorEntityDescription(  # 433
+        key=MetaRegisters.CH_ENERGY_CONSUMPTION.name,
+        name="ch_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.DHW_ENERGY_CONSUMPTION: SensorEntityDescription(  # 435
+        key=MetaRegisters.DHW_ENERGY_CONSUMPTION.name,
+        name="dhw_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.COOLING_ENERGY_CONSUMPTION: SensorEntityDescription(  # 437
+        key=MetaRegisters.COOLING_ENERGY_CONSUMPTION.name,
+        name="cooling_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
+    ),
+    MetaRegisters.BACKUP_ENERGY_CONSUMPTION: SensorEntityDescription(  # 441
+        key=MetaRegisters.BACKUP_ENERGY_CONSUMPTION.name,
+        name="backup_energy_consumption",
+        native_unit_of_measurement="kWh",
+        device_class=SensorDeviceClass.ENERGY,
+        state_class=SensorStateClass.TOTAL,
     ),
     MetaRegisters.TOTAL_ENERGY_CONSUMPTION: SensorEntityDescription(  # 439
         key=MetaRegisters.TOTAL_ENERGY_CONSUMPTION.name,

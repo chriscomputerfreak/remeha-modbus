@@ -1,6 +1,7 @@
 {
   "domain": "remeha_modbus",
   "name": "Remeha Modbus",
+  "after_dependencies": ["knmi", "scheduler"],
   "codeowners": ["@houthacker"],
   "config_flow": true,
   "dependencies": ["modbus"],
@@ -10,6 +11,10 @@
   "issue_tracker": "https://github.com/houthacker/remeha-modbus/issues",
   "loggers": ["remeha_modbus"],
   "quality_scale": "bronze",
-  "requirements": ["pymodbus", "python-dateutil==2.9.0.post0"],
-  "version": "0.8.2"
+  "requirements": [
+    "aio-remeha-modbus==0.3.0",
+    "python-dateutil==2.9.0.post0",
+    "serialx"
+  ],
+  "version": "1.0.0b3"
 }

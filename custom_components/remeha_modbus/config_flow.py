@@ -1,7 +1,5 @@
 """Config flow for the Remeha Modbus integration."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -16,7 +14,7 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TYPE
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.selector import selector
+from homeassistant.helpers.selector import SerialPortSelector, selector
 
 from custom_components.remeha_modbus.const import (
     AUTO_SCHEDULE_SELECTED_SCHEDULE,
@@ -58,7 +56,7 @@ from custom_components.remeha_modbus.const import (
     BoilerEnergyLabel,
     PVSystemOrientation,
 )
-from custom_components.remeha_modbus.helpers import config_validation as remeha_cv
+from custom_components.remeha_modbus.helpers import validation as remeha_cv
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -73,14 +71,16 @@ def _auto_scheduling_schema(current: ConfigEntry | None = None) -> vol.Schema:
             ): selector({"entity": {"filter": {"domain": WeatherDomain}}}),
             vol.Required(
                 AUTO_SCHEDULE_SELECTED_SCHEDULE,
-                default=current.data[AUTO_SCHEDULE_SELECTED_SCHEDULE]
-                if current
-                else REMEHA_PRESET_SCHEDULE_1,
+                default=(
+                    current.data[AUTO_SCHEDULE_SELECTED_SCHEDULE]
+                    if current
+                    else REMEHA_PRESET_SCHEDULE_1
+                ),
             ): selector(
                 {
                     "select": {
                         "mode": "dropdown",
-                        "translation_key": "select_default_auto_schedule_id",
+                        "translation_key": "schedule_id",
                         "options": [
                             REMEHA_PRESET_SCHEDULE_1,
                             REMEHA_PRESET_SCHEDULE_2,
@@ -94,42 +94,50 @@ def _auto_scheduling_schema(current: ConfigEntry | None = None) -> vol.Schema:
                     {
                         vol.Required(
                             PV_NOMINAL_POWER_WP,
-                            default=current.data[PV_CONFIG_SECTION][PV_NOMINAL_POWER_WP]
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[PV_CONFIG_SECTION][PV_NOMINAL_POWER_WP]
+                                if current
+                                else vol.UNDEFINED
+                            ),
                         ): cv.positive_int,
                         vol.Optional(
                             PV_ORIENTATION,
-                            default=current.data[PV_CONFIG_SECTION].get(
-                                PV_ORIENTATION, vol.UNDEFINED
-                            )
-                            if current
-                            else PVSystemOrientation.SOUTH,
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(PV_ORIENTATION, vol.UNDEFINED)
+                                if current
+                                else PVSystemOrientation.SOUTH
+                            ),
                         ): remeha_cv.str_enum(PVSystemOrientation),
                         vol.Optional(
                             PV_TILT,
-                            default=current.data[PV_CONFIG_SECTION].get(PV_TILT, vol.UNDEFINED)
-                            if current
-                            else 30.0,
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(PV_TILT, vol.UNDEFINED)
+                                if current
+                                else 30.0
+                            ),
                         ): vol.All(
                             vol.Coerce(float),
                             vol.Range(min=PV_MIN_TILT_DEGREES, max=PV_MAX_TILT_DEGREES),
                         ),
                         vol.Optional(
                             PV_ANNUAL_EFFICIENCY_DECREASE,
-                            default=current.data[PV_CONFIG_SECTION].get(
-                                PV_ANNUAL_EFFICIENCY_DECREASE, vol.UNDEFINED
-                            )
-                            if current
-                            else 0.0,
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(
+                                    PV_ANNUAL_EFFICIENCY_DECREASE, vol.UNDEFINED
+                                )
+                                if current
+                                else 0.0
+                            ),
                         ): cv.positive_float,
                         vol.Optional(
                             PV_INSTALLATION_DATE,
-                            default=current.data[PV_CONFIG_SECTION].get(
-                                PV_INSTALLATION_DATE, vol.UNDEFINED
-                            )
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(
+                                    PV_INSTALLATION_DATE, vol.UNDEFINED
+                                )
+                                if current
+                                else vol.UNDEFINED
+                            ),
                         ): selector({"date": {}}),
                     }
                 ),
@@ -140,25 +148,31 @@ def _auto_scheduling_schema(current: ConfigEntry | None = None) -> vol.Schema:
                     {
                         vol.Required(
                             DHW_BOILER_VOLUME,
-                            default=current.data[DHW_BOILER_CONFIG_SECTION][DHW_BOILER_VOLUME]
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[DHW_BOILER_CONFIG_SECTION][DHW_BOILER_VOLUME]
+                                if current
+                                else vol.UNDEFINED
+                            ),
                         ): cv.positive_int,
                         vol.Optional(
                             DHW_BOILER_HEAT_LOSS_RATE,
-                            default=current.data[DHW_BOILER_CONFIG_SECTION].get(
-                                DHW_BOILER_HEAT_LOSS_RATE, vol.UNDEFINED
-                            )
-                            if current
-                            else 0.0,
+                            default=(
+                                current.data[DHW_BOILER_CONFIG_SECTION].get(
+                                    DHW_BOILER_HEAT_LOSS_RATE, vol.UNDEFINED
+                                )
+                                if current
+                                else 0.0
+                            ),
                         ): cv.positive_float,
                         vol.Optional(
                             DHW_BOILER_ENERGY_LABEL,
-                            current.data[DHW_BOILER_CONFIG_SECTION].get(
-                                DHW_BOILER_ENERGY_LABEL, vol.UNDEFINED
-                            )
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[DHW_BOILER_CONFIG_SECTION].get(
+                                    DHW_BOILER_ENERGY_LABEL, vol.UNDEFINED
+                                )
+                                if current
+                                else vol.UNDEFINED
+                            ),
                         ): remeha_cv.str_enum(BoilerEnergyLabel),
                     }
                 ),
@@ -173,21 +187,29 @@ def _modbus_serial_schema(current: ConfigEntry | None = None) -> vol.Schema:
         {
             vol.Required(
                 MODBUS_SERIAL_BAUDRATE,
-                default=current.data[MODBUS_SERIAL_BAUDRATE] if current else 115200,
+                default=current.data[MODBUS_SERIAL_BAUDRATE]
+                if current and MODBUS_SERIAL_BAUDRATE in current.data
+                else 115200,
             ): cv.positive_int,
             vol.Required(
                 MODBUS_SERIAL_BYTESIZE,
-                default=current.data[MODBUS_SERIAL_BYTESIZE] if current else 8,
+                default=current.data[MODBUS_SERIAL_BYTESIZE]
+                if current and MODBUS_SERIAL_BYTESIZE in current.data
+                else 8,
             ): vol.All(int, vol.In([5, 6, 7, 8])),
             vol.Required(
                 MODBUS_SERIAL_METHOD,
-                default=current.data[MODBUS_SERIAL_METHOD] if current else MODBUS_SERIAL_METHOD_RTU,
+                default=current.data[MODBUS_SERIAL_METHOD]
+                if current and MODBUS_SERIAL_METHOD in current.data
+                else MODBUS_SERIAL_METHOD_RTU,
             ): vol.In([MODBUS_SERIAL_METHOD_RTU, MODBUS_SERIAL_METHOD_ASCII]),
             vol.Required(
                 MODBUS_SERIAL_PARITY,
-                default=current.data[MODBUS_SERIAL_PARITY]
-                if current
-                else MODBUS_SERIAL_PARITY_NONE,
+                default=(
+                    current.data[MODBUS_SERIAL_PARITY]
+                    if current and MODBUS_SERIAL_PARITY in current.data
+                    else MODBUS_SERIAL_PARITY_NONE
+                ),
             ): vol.In(
                 [
                     MODBUS_SERIAL_PARITY_EVEN,
@@ -197,10 +219,12 @@ def _modbus_serial_schema(current: ConfigEntry | None = None) -> vol.Schema:
             ),
             vol.Required(
                 CONF_PORT, default=current.data[CONF_PORT] if current else vol.UNDEFINED
-            ): vol.Any(cv.port, cv.string),
+            ): SerialPortSelector(),
             vol.Required(
                 MODBUS_SERIAL_STOPBITS,
-                default=current.data[MODBUS_SERIAL_STOPBITS] if current else 2,
+                default=current.data[MODBUS_SERIAL_STOPBITS]
+                if current and MODBUS_SERIAL_STOPBITS in current.data
+                else 2,
             ): vol.All(int, vol.In([1, 2])),
         }
     )
@@ -304,8 +328,18 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=vol.Schema(
                 {
                     vol.Required(CONF_NAME): cv.string,
-                    vol.Required(CONF_TYPE): vol.In(
-                        [CONNECTION_TCP, CONNECTION_UDP, CONNECTION_RTU_OVER_TCP, CONNECTION_SERIAL]
+                    vol.Required(CONF_TYPE): selector(
+                        {
+                            "select": {
+                                "translation_key": "modbus_type",
+                                "options": [
+                                    CONNECTION_TCP,
+                                    CONNECTION_UDP,
+                                    CONNECTION_RTU_OVER_TCP,
+                                    CONNECTION_SERIAL,
+                                ],
+                            }
+                        }
                     ),
                     vol.Required(MODBUS_DEVICE_ADDRESS, default=100): cv.positive_int,
                     vol.Optional(CONFIG_AUTO_SCHEDULE, default=False): cv.boolean,
@@ -333,9 +367,11 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
                 return self.async_show_form(
                     step_id="modbus_serial",
                     data_schema=_modbus_serial_schema(
-                        current=self._get_reconfigure_entry()
-                        if self.source == SOURCE_RECONFIGURE
-                        else None
+                        current=(
+                            self._get_reconfigure_entry()
+                            if self.source == SOURCE_RECONFIGURE
+                            else None
+                        )
                     ),
                     errors=errors,
                 )
@@ -343,9 +379,9 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="modbus_socket",
                 data_schema=_modbus_socket_schema(
-                    current=self._get_reconfigure_entry()
-                    if self.source == SOURCE_RECONFIGURE
-                    else None
+                    current=(
+                        self._get_reconfigure_entry() if self.source == SOURCE_RECONFIGURE else None
+                    )
                 ),
                 errors=errors,
             )
@@ -394,7 +430,7 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_reconfigure(self: ConfigFlow, user_input: dict[str, Any] | None = None):
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
         """Reconfigure the modbus connection."""
 
         errors: dict[str, str] = {}
@@ -433,8 +469,18 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
             step_id="reconfigure",
             data_schema=vol.Schema(
                 {
-                    vol.Required(CONF_TYPE, default=reconf_entry.data[CONF_TYPE]): vol.In(
-                        [CONNECTION_TCP, CONNECTION_UDP, CONNECTION_RTU_OVER_TCP, CONNECTION_SERIAL]
+                    vol.Required(CONF_TYPE, default=reconf_entry.data[CONF_TYPE]): selector(
+                        {
+                            "select": {
+                                "translation_key": "modbus_type",
+                                "options": [
+                                    CONNECTION_TCP,
+                                    CONNECTION_UDP,
+                                    CONNECTION_RTU_OVER_TCP,
+                                    CONNECTION_SERIAL,
+                                ],
+                            }
+                        }
                     ),
                     vol.Required(
                         MODBUS_DEVICE_ADDRESS, default=reconf_entry.data[MODBUS_DEVICE_ADDRESS]

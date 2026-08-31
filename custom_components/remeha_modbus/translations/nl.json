@@ -19,7 +19,19 @@
           "name": "De unieke naam van de modbus hub.",
           "type": "Het type modbus verbinding.",
           "slave": "Het GTW-08 modbus adres.",
-          "auto_schedule": "Configureer geautomatiseerde DHW planning."
+          "auto_schedule": "Configureer automatische DHW planning."
+        }
+      },
+      "reconfigure": {
+        "data": {
+          "slave": "Modbus adres",
+          "type": "Type verbinding",
+          "auto_schedule": "DHW planning"
+        },
+        "data_description": {
+          "slave": "Hetr GTW-08 modbus adres.",
+          "type": "Het type modbus verbinding.",
+          "auto_schedule": "Configureer automatische DHW planning."
         }
       },
       "auto_scheduling": {
@@ -96,13 +108,36 @@
     }
   },
   "selector": {
-    "select_default_auto_schedule_id": {
+    "schedule_id": {
       "options": {
-        "schedule_1": "Schema 1",
-        "schedule_2": "Schema 2",
-        "schedule_3": "Schema 3"
+        "schedule_1": "Programma 1",
+        "schedule_2": "Programma 2",
+        "schedule_3": "Programma 3",
+        "schedule_4": "Koelschema"
       }
-    }
+    },
+    "weekday": {
+      "options": {
+        "mon": "maandag",
+        "tue": "dinsdag",
+        "wed": "woensdag",
+        "thu": "donderdag",
+        "fri": "vrijdag",
+        "sat": "zaterdag",
+        "sun": "zondag"
+      }
+    },
+    "modbus_type": {
+      "options": {
+        "tcp": "TCP",
+        "udp": "UDP",
+        "rtuovertcp": "RTU over TCP",
+        "serial": "Serial"
+      }
+    },
+    "modbus_register": {},
+    "register_count": {},
+    "struct_format": {}
   },
   "entity": {
     "climate": {
@@ -110,35 +145,187 @@
         "state_attributes": {
           "preset_mode": {
             "state": {
-              "schedule_1": "Schema 1",
-              "schedule_2": "Schema 2",
-              "schedule_3": "Schema 3",
-              "manual": "Handmatig",
               "anti_frost": "Antivries",
               "comfort": "Comfort",
-              "eco": "Eco"
+              "eco": "Eco",
+              "manual": "Handmatig",
+              "schedule_1": "Programma 1",
+              "schedule_2": "Programma 2",
+              "schedule_3": "Programma 3",
+              "schedule_4": "Koelschema"
             }
           }
+        }
+      }
+    },
+    "select": {
+      "appliance_silent_mode": {
+        "name": "Stille modus",
+        "state": {
+          "off": "Uit",
+          "level_1": "Level 1",
+          "level_2": "Level 2"
+        }
+      }
+    },
+    "switch": {
+      "enable_schedule_sync": {
+        "name": "Schema synchronisatie."
+      },
+      "heatpump_managed_schedules": {
+        "name": "Warmtepomp beheert uitvoer van klokprogramma's."
+      }
+    },
+    "time": {
+      "silent_mode_start_time": {
+        "name": "Starttijd stille modus"
+      },
+      "silent_mode_end_time": {
+        "name": "Eindtijd stille modus"
+      }
+    },
+    "sensor": {
+      "season_mode": {
+        "name": "Seizoen",
+        "state": {
+          "winter": "Winter",
+          "frost_protection": "Vorstbeveiliging",
+          "transition_season": "Overgangsseizoen",
+          "summer": "Zomer"
+        }
+      },
+      "status": {
+        "name": "Status",
+        "state": {
+          "standby": "Stand-by",
+          "heat_demand": "Warmtevraag",
+          "generator_start": "Generator start",
+          "generator_heating": "Generator verwarming",
+          "generator_dhw": "Generator warm water",
+          "generator_stop": "Generator stop",
+          "pump_post_run": "Pompnalooptijd",
+          "cooling": "Koelen",
+          "controlled_shutdown": "Gecontroleerde uitschakeling",
+          "start_prevention": "Startpreventie",
+          "locking_mode": "Vergrendelingsmodus",
+          "load_test_min": "Belastingtest min.",
+          "load_test_heating_max": "Belastingtest verwarming max.",
+          "load_test_dhw_max": "Belastingtest warm water max.",
+          "manual_heat_demand": "Handmatige warmtevraag",
+          "frost_protection": "Vorstbeveiliging",
+          "venting": "Ontluchten",
+          "control_unit_cooling": "Regeleenheid koelen",
+          "resetting": "Bezig met resetten",
+          "automatic_filling": "Automatisch vullen",
+          "stopped": "Gestopt",
+          "calibration": "Kalibratie",
+          "factory_test": "Fabriekstest",
+          "hydraulic_balancing": "Hydraulisch inregelen",
+          "device_mode": "Apparaatmodus",
+          "unknown": "Onbekend"
+        }
+      },
+      "substatus": {
+        "name": "Substatus",
+        "state": {
+          "standby": "Stand-by",
+          "pause_time": "Pauzetijd / kortcyclusbeveiliging",
+          "close_hydraulic_valve": "Hydraulische klep sluiten",
+          "stop_pump": "Pomp stoppen",
+          "wait_start_release": "Wachten op startvrijgave",
+          "generator_starting": "Generator start",
+          "internal_setpoint": "Intern setpoint",
+          "limited_internal_setpoint": "Begrensd intern setpoint",
+          "power_controlled": "Vermogensgeregeld",
+          "pump_post_run": "Pompnalooptijd",
+          "start_pump": "Pomp starten",
+          "start_pause_time": "Pauzetijd starten",
+          "compressor_unloaded": "Compressor ontlast",
+          "hp_tmax_backup_on": "WP Tmax bijverwarming aan",
+          "outside_temp_limit_hp_off": "Buitentemperatuurgrens WP uit",
+          "hp_stop_by_hybrid": "WP-stop door hybride",
+          "defrost_with_heat_pump": "Ontdooien met warmtepomp",
+          "defrost_with_backup": "Ontdooien met bijverwarming",
+          "defrost_hp_and_backup": "Ontdooien WP + bijverwarming",
+          "hp_flow_above_tmax": "WP aanvoer boven Tmax",
+          "hp_off_high_humidity": "WP uit door hoge luchtvochtigheid",
+          "hp_off_flow": "WP uit door debiet",
+          "generator_unloaded": "Generator ontlast",
+          "hp_unloaded_cooling": "WP ontlast (koelen)",
+          "hp_stop_outside_temp": "WP stop (buitentemperatuur)",
+          "hp_off_flow_tmax": "WP uit (aanvoer Tmax)",
+          "bl_backup_off": "Blokkering: bijverwarming uit",
+          "bl_heat_pump_off": "Blokkering: warmtepomp uit",
+          "bl_hp_and_backup_off": "Blokkering: WP en bijverwarming uit",
+          "low_tariff": "Laagtarief",
+          "pv_with_heat_pump": "PV met warmtepomp",
+          "pv_hp_and_backup": "PV: WP en bijverwarming",
+          "smart_grid": "Smart grid",
+          "wait_water_pressure": "Wachten op waterdruk",
+          "no_generator_available": "Geen generator beschikbaar",
+          "free_cooling_pump_off": "Vrije koeling, pomp uit",
+          "free_cooling_pump_on": "Vrije koeling, pomp aan",
+          "blocking_active": "Blokkering actief",
+          "warming_up": "Opwarmen",
+          "curative_defrost": "Curatief ontdooien",
+          "preventive_defrost": "Preventief ontdooien",
+          "init_completed": "Initialisatie voltooid",
+          "init_csu": "Initialisatie CSU",
+          "init_identification": "Initialisatie identificatie",
+          "init_blocking_parameters": "Initialisatie blokkeerparameters",
+          "init_safety_unit": "Initialisatie veiligheidsunit",
+          "init_blocking": "Initialisatie blokkering",
+          "unknown": "Onbekend",
+          "safety_shutdown": "Veiligheidsuitschakeling / reset-wachttijd"
         }
       }
     }
   },
   "services": {
+    "bootstrap_blenders": {
+      "name": "Blenders opstarten",
+      "description": "Verbindingen met andere integraties opstarten. Herhaalde aanroepen van deze service hebben geen effect."
+    },
+    "create_default_zone_schema": {
+      "name": "Maak een standaard klokprogramma",
+      "description": "Maak een standaard klokprogramma voor het gekozen schema en de gekozen dag van de week",
+      "fields": {
+        "schedule_id": {
+          "name": "Selecteer het te gebruiken schema"
+        },
+        "weekday": {
+          "name": "Selecteer de dag van de week waarop het schema wordt toegepast"
+        }
+      }
+    },
     "dhw_auto_schedule": {
       "name": "SWW automatische planning",
       "description": "Maak een SWW planning voor de volgende dag, gebaseerd op de weersvoorspelling en de boiler/zonnepanelen configuration. Vereiest een weather integratie die voorziet in zonnestraling (GHI) in de uurlijkse voorspellingen."
+    },
+    "force_system_rediscovery": {
+      "name": "Forceer systeemontdekking",
+      "description": "Forceer je Remeha installatie apparaat- en zone-informatie te verversen. Na het uitvoeren van deze service moet Home Assistant herstart worden."
+    },
+    "read_registers": {
+      "name": "Lees modbus registers",
+      "description": "Lees een aantal opeenvolgende modbus registers van de GTW-08",
+      "fields": {
+        "start_register": {
+          "name": "Startregister",
+          "description": "Het eerste te lezen register"
+        },
+        "register_count": {
+          "name": "Aantal",
+          "description": "Het aantal te lezen registers"
+        },
+        "struct_format": {
+          "name": "Struct format",
+          "description": "Format voor het deserializeren van de registers. Zie [python3 struct format]({python_struct_format_docs_url})."
+        }
+      }
     }
   },
   "exceptions": {
-    "climate_invalid_operation_ctx": {
-      "message": "Aangevraagde actie '{operation}' is ongeldig in voorkeuzemodus {preset_mode}."
-    },
-    "climate_invalid_operation_ctx_hvac": {
-      "message": "Zone modus {hvac_mode} is ongeldig in zone {zone_name}."
-    },
-    "climate_unsupported_preset_mode": {
-      "message": "Aanvraagde voorkeuzemodus {preset_mode} wordt niet ondersteund."
-    },
     "auto_schedule_unsupported_temperature_unit": {
       "message": "Entiteit {entity_id} gebruikt een niet-ondersteunde temperatuureenheid {unit_of_temperature}."
     },
@@ -159,6 +346,118 @@
     },
     "auto_schedule_value_error": {
       "message": "Kan geen automatische planning maken: fout tijdens het deserializeren van het modbus bericht, zie logs voor details."
+    },
+    "bootstrap_blenders_error": {
+      "message": "Fout tijdens het koppelen met andere integraties."
+    },
+    "climate_invalid_operation_ctx": {
+      "message": "Aangevraagde actie '{operation}' is ongeldig in voorkeuzemodus {preset_mode}."
+    },
+    "climate_invalid_operation_ctx_hvac": {
+      "message": "Zone modus {hvac_mode} is ongeldig in zone {zone_name}."
+    },
+    "climate_unsupported_preset_mode": {
+      "message": "Aanvraagde voorkeuzemodus {preset_mode} wordt niet ondersteund."
+    },
+    "config_entry_error_connection_type": {
+      "message": "{connection_type} is geen geldig type verbinding. Gebruik een type uit de lijst [{connection_types}]"
+    },
+    "config_entry_key_error": {
+      "message": "Fout in configuratie: veld {key} is ongeldig of vereist en niet aanwezig."
+    },
+    "incorrect_entity_platform": {
+      "message": "Entity {entity_id} hoort niet bij platform {expected_platform} en/of integratie {expected_component}."
+    },
+    "missing_external_component": {
+      "message": "Integratie '{component}' niet gevonden. Installeer de integratie en probeer het opnieuw. Installatie-instructies zijn te vinden op {url}."
+    },
+    "parse_error_multiple_weekdays": {
+      "message": "Kan state {schedule_entity_id} niet vertalen naar ZoneSchedule: schema moet precies 1 weekdag hebben, maar het geldt voor meerdere."
+    },
+    "parse_error_entity_not_found": {
+      "message": "Kan ZoneSchedule niet vertalen naar scheduler schema: kan vereiste climate entity_id niet vinden."
+    },
+    "parse_error_scheduler_state_action": {
+      "message": "Kan state {schedule_entity_id} niet vertalen naar ZoneSchedule: vereiste service call om climate mode in te stellen niet gevonden."
+    },
+    "parse_error_time_slot": {
+      "message": "Kan state {schedule_entity_id} niet vertalen naar ZoneSchedule: timeslot {time_slot} moet uit precies 2 delen bestaan, maar heeft er {part_count}."
+    },
+    "read_registers_modbus_error": {
+      "message": "Modbus fout tijdens het lezen van de registers."
+    },
+    "read_registers_illegal_struct_format": {
+      "message": "Kan registers niet verwerken: ongeldig struct format {struct_format}."
+    },
+    "read_registers_unknown_error": {
+      "message": "Onbekende fout tijdens het lezen van de registers. Zie log voor details."
+    },
+    "schedule_update_non_equal_climates": {
+      "message": "Kan zone schema updates niet bepalen: er is een zone toegevoegd of verwijderd."
+    },
+    "scenario_execution_error_missing_required_state": {
+      "message": "Kan scenario {scenario} niet uitvoeren: vereiste entitystate uit integratie {component} mist."
+    },
+    "scenario_execution_error_missing_climate": {
+      "message": "Kan scenario {scenario} niet uitvoeren: climate dat gekoppeld is aan scheduler.schedule {scheduler_entity} niet gevonden."
+    },
+    "service_error_missing_state": {
+      "message": "Kan nieuw toegevoegde entity {entity_id} niet verwerken: nieuwe state niet beschikbaar."
+    },
+    "update_failed_discovery_table_corrupted": {
+      "message": "Modbus discovery table is corrupt. Ga naar het repairs dashboard om dit op te lossen."
+    },
+    "update_failed_invalid_zone_schedule": {
+      "message": "Data update mislukt: Zone {zone} gebruikt klokschema {selected_schedule}, maar het decoderen ervan is mislukt. Ga naar het repairs dashboard om dit op te lossen."
+    },
+    "update_failed_modbus_exception": {
+      "message": "Data update mislukt: Modbus exception {modbus_message}"
+    }
+  },
+  "issues": {
+    "discovery_table_corrupted": {
+      "title": "Modbus discovery tabel ongeldig",
+      "fix_flow": {
+        "step": {
+          "confirm_force_rediscovery": {
+            "title": "Forceer modbus verkenning",
+            "description": "De verkenningstabel van de GTW-08 lijkt ongeldig te zijn. Je kunt dit oplossen door modbus verkenning te forceren en Home Assistant te herstarten. Dit heeft geen invloed op de instellingen van je Remeha apparaat."
+          }
+        }
+      }
+    },
+    "heatpump_managed_schedules_turned_off": {
+      "title": "Klokprogramma's niet uitgevoerd door Remeha apparaat.",
+      "fix_flow": {
+        "step": {
+          "confirm_undo": {
+            "title": "Laat klokprogramma's uitvoeren door je Remeha apparaat",
+            "description": "Je hebt een switch uitgeschakeld waardoor Home Assistant de klokprogramma's uitvoert i.p.v. je Remeha apparaat. Klik op verzenden om dit te herstellen, of herstart Home Assistant om dit te negeren."
+          }
+        }
+      }
+    },
+    "invalid_zone_schedule": {
+      "title": "Ongeldig klokprogramma",
+      "fix_flow": {
+        "step": {
+          "confirm_overwrite": {
+            "title": "Overschrijf klokprogramma",
+            "description": "> [!WARNING]\n> Fout tijdens het parsen van een klokprogramma. Los dit probleem op door het ongeldige klokprogramma te overschrijven met een standaard programma dat enkel de modus antivries/eco gebruikt, afhankelijk van het zone type.\n\n> Vermoed je dat dit een bug is i.p.v. een invalide klokprogramma? Meldt dit dan [hier]({issue_tracker_url})"
+          }
+        }
+      }
+    },
+    "restart_required_force_system_rediscovery": {
+      "title": "Herstart vereist",
+      "fix_flow": {
+        "step": {
+          "confirm_restart": {
+            "title": "Herstart vereist",
+            "description": "Je Remeha apparaat heeft de apparaat- en zone-informatie ververst. Daardoor is een herstart van Home Assistant vereist. Klik op verzenden om nu te herstarten."
+          }
+        }
+      }
     }
   }
 }

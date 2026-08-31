@@ -2,7 +2,9 @@
 
 import logging
 from collections.abc import Callable
+from typing import cast
 
+from aio_remeha_modbus.api.api import DeviceInstance
 from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -10,7 +12,6 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.remeha_modbus.api import DeviceInstance
 from custom_components.remeha_modbus.const import DOMAIN
 from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
 
@@ -26,10 +27,67 @@ async def async_setup_entry(
     mainboards: list[DeviceInstance] = coordinator.get_devices(
         predicate=lambda device: device.is_mainboard()
     )
-    parent_device_id: int = mainboards[0].id if mainboards else None
+    parent_device_id: int | None = mainboards[0].id if mainboards else None
 
     async_add_entities(
         [
+            RemehaBinarySensorEntity(
+                coordinator=coordinator,
+                parent_device_id=parent_device_id,
+                name="unmixed_circuits_released",
+                device_class=None,
+                state_func=lambda: (
+                    coordinator.get_appliance().demand_status.unmixed_circuits_released
+                ),
+            ),
+            RemehaBinarySensorEntity(
+                coordinator=coordinator,
+                parent_device_id=parent_device_id,
+                name="mixed_circuits_released",
+                device_class=None,
+                state_func=lambda: (
+                    coordinator.get_appliance().demand_status.mixed_circuits_released
+                ),
+            ),
+            RemehaBinarySensorEntity(
+                coordinator=coordinator,
+                parent_device_id=parent_device_id,
+                name="valves_open_or_pump_running_safety",
+                device_class=None,
+                state_func=lambda: (
+                    coordinator.get_appliance().demand_status.valves_open_or_pump_running_safety
+                ),
+            ),
+            RemehaBinarySensorEntity(
+                coordinator=coordinator,
+                parent_device_id=parent_device_id,
+                name="manual_heat_demand_active",
+                device_class=None,
+                state_func=lambda: (
+                    coordinator.get_appliance().demand_status.manual_heat_demand_active
+                ),
+            ),
+            RemehaBinarySensorEntity(
+                coordinator=coordinator,
+                parent_device_id=parent_device_id,
+                name="cooling_allowed",
+                device_class=None,
+                state_func=lambda: coordinator.get_appliance().demand_status.cooling_allowed,
+            ),
+            RemehaBinarySensorEntity(
+                coordinator=coordinator,
+                parent_device_id=parent_device_id,
+                name="dhw_circuits_released",
+                device_class=None,
+                state_func=lambda: coordinator.get_appliance().demand_status.dhw_circuits_released,
+            ),
+            RemehaBinarySensorEntity(
+                coordinator=coordinator,
+                parent_device_id=parent_device_id,
+                name="burner_unit_active",
+                device_class=None,
+                state_func=lambda: coordinator.get_appliance().demand_status.burner_unit_active,
+            ),
             RemehaBinarySensorEntity(
                 coordinator=coordinator,
                 parent_device_id=parent_device_id,
@@ -139,7 +197,7 @@ async def async_setup_entry(
     )
 
 
-class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
+class RemehaBinarySensorEntity(CoordinatorEntity[RemehaUpdateCoordinator], BinarySensorEntity):
     """Binary sensor entity to describe the different appliance status fields in the Remeha Modbus integration."""
 
     _attr_has_entity_name = True
@@ -150,7 +208,7 @@ class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
         coordinator: RemehaUpdateCoordinator,
         parent_device_id: int | None,
         name: str,
-        device_class: BinarySensorDeviceClass,
+        device_class: BinarySensorDeviceClass | None,
         state_func: Callable[[], bool | None],
     ):
         """Create a new binary sensor entity."""
@@ -171,7 +229,7 @@ class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
     def translation_key(self) -> str:
         """The translation key."""
 
-        return self.name
+        return cast(str, self.name)
 
     @property
     def is_on(self) -> bool | None:
@@ -196,10 +254,12 @@ class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
         if self._parent_device_id is None:
             return None
 
-        device_instance: DeviceInstance = self.coordinator.get_device(id=self._parent_device_id)
+        device_instance: DeviceInstance | None = self.coordinator.get_device(
+            id=self._parent_device_id
+        )
         return (
             DeviceInfo(
-                identifiers={(DOMAIN, device_instance.article_number)},
+                identifiers={(DOMAIN, str(device_instance.article_number))},
                 hw_version=f"HW{device_instance.hw_version[0]:02d}.{device_instance.hw_version[1]:02d}",
                 manufacturer="Remeha",
                 model=str(device_instance.board_category),
