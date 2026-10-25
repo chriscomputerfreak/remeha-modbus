@@ -1,0 +1,260 @@
+"""Tests for repair flows."""
+
+from unittest.mock import patch
+
+import pytest
+from aio_remeha_modbus.gtw08 import GTW08
+from aio_remeha_modbus.gtw08.const import REMEHA_ZONE_RESERVED_REGISTERS
+from aio_remeha_modbus.gtw08.errors import DiscoveryTableCorruptedError
+from homeassistant.components.climate.const import ATTR_PRESET_MODE, PRESET_ECO
+from homeassistant.components.switch.const import DOMAIN as SwitchDomain
+from homeassistant.const import ATTR_ENTITY_ID, SERVICE_TURN_OFF, STATE_OFF, STATE_ON
+from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+from homeassistant.helpers import issue_registry as ir
+from modbus_connection.mock import MockModbusUnit
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.remeha_modbus.const import (
+    DOMAIN,
+    HEATPUMP_MANAGED_SCHEDULES,
+    ISSUE_DISCOVERY_TABLE_CORRUPTED,
+    ISSUE_HEATPUMP_MANAGED_SCHEDULES_OFF,
+    ISSUE_INVALID_ZONE_SCHEDULE,
+)
+from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
+from custom_components.remeha_modbus.helpers.entities import get_climate_entity_id
+from tests.conftest import setup_platform
+from tests.util.repairs import get_repairs, process_repair_fix_flow, start_repair_fix_flow
+
+
+@pytest.mark.parametrize(
+    "remeha_modbus_unit", ["modbus_store_corrupted_discovery_table.json"], indirect=True
+)
+async def test_discovery_table_corrupted_repair(
+    hass: HomeAssistant,
+    remeha_api: GTW08,
+    mock_config_entry,
+    hass_client,
+    hass_ws_client,
+    remeha_modbus_unit,
+):
+    """Test repairing a corrupted modbus discovery table."""
+
+    remeha_modbus_unit.fail_read(
+        129, DiscoveryTableCorruptedError(translation_key="discovery_table_corrupted")
+    )
+
+    with patch(
+        "aio_remeha_modbus.gtw08.GTW08",
+        new=lambda *args, **kwargs: remeha_api,
+    ):
+        # Modbus recovery register must be zero
+        (discovery_register,) = await remeha_api.async_read_registers(
+            200,  # reset discovery table
+        )
+        assert discovery_register == 0x0000
+
+        # Start remeha_modbus
+        await setup_platform(
+            hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+        )
+        await hass.async_block_till_done()
+
+        # Start repair fix flow
+        issue_registry = ir.async_get(hass)
+        issues = await get_repairs(hass, hass_ws_client)
+        assert issues
+        assert issue_registry.async_get_issue(DOMAIN, ISSUE_DISCOVERY_TABLE_CORRUPTED) is not None
+
+        client = await hass_client()
+        data = await start_repair_fix_flow(client, DOMAIN, ISSUE_DISCOVERY_TABLE_CORRUPTED)
+
+        flow_id = data["flow_id"]
+        assert data["type"] == FlowResultType.FORM
+        assert data["step_id"] == "confirm_force_rediscovery"
+
+        # Issue must have been removed
+        data = await process_repair_fix_flow(client, flow_id, json={})
+        assert data["type"] == FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+        assert issue_registry.async_get_issue(DOMAIN, ISSUE_DISCOVERY_TABLE_CORRUPTED) is None
+
+        # And modbus register 200 must contain 0x5a
+        (discovery_register,) = await remeha_api.async_read_registers(200)  # reset discovery table
+        assert discovery_register == 0x5A00
+
+
+@pytest.mark.parametrize(
+    "remeha_modbus_unit", ["modbus_store_invalid_timeslot.json"], indirect=True
+)
+@pytest.mark.parametrize("remeha_api", [{"require_update": False}], indirect=True)
+async def test_invalid_zone_schedule_repair(
+    hass: HomeAssistant,
+    remeha_api: GTW08,
+    mock_config_entry,
+    hass_client,
+    hass_ws_client,
+    remeha_modbus_unit,
+):
+    """Test repairing an invalid zone schedule."""
+
+    with patch(
+        "aio_remeha_modbus.gtw08.GTW08",
+        new=lambda *args, **kwargs: remeha_api,
+    ):
+        # Start remeha_modbus
+        await setup_platform(
+            hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+        )
+        await hass.async_block_till_done()
+
+        # And modbus register 1201 must contain 0x05a1
+        (timeslot_activity_register,) = await remeha_api.async_read_registers(
+            689 + REMEHA_ZONE_RESERVED_REGISTERS,
+        )
+        assert timeslot_activity_register == 0xA105
+
+        # Start repair fix flow
+        issue_registry = ir.async_get(hass)
+        issues = await get_repairs(hass, hass_ws_client)
+        assert issues
+        assert issue_registry.async_get_issue(DOMAIN, ISSUE_INVALID_ZONE_SCHEDULE) is not None
+
+        client = await hass_client()
+        data = await start_repair_fix_flow(client, DOMAIN, ISSUE_INVALID_ZONE_SCHEDULE)
+
+        flow_id = data["flow_id"]
+        assert data["type"] == FlowResultType.FORM
+        assert data["step_id"] == "confirm_overwrite"
+
+        # Issue must have been removed
+        data = await process_repair_fix_flow(client, flow_id, json={})
+        assert data["type"] == FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+        assert issue_registry.async_get_issue(DOMAIN, ISSUE_INVALID_ZONE_SCHEDULE) is None
+
+        # And modbus register 1201 must contain 0xa001 (was 0x05a1)
+        (timeslot_activity_register,) = await remeha_api.async_read_registers(
+            689 + REMEHA_ZONE_RESERVED_REGISTERS,
+        )
+        assert timeslot_activity_register == 0xA001
+
+
+async def test_auto_resolve_schedule_repair(
+    hass: HomeAssistant,
+    mock_config_entry: MockConfigEntry,
+    hass_ws_client,
+    remeha_modbus_unit: MockModbusUnit,
+):
+    """Test that a repair resolves itself after a successful coordinator update."""
+
+    # Start remeha_modbus
+    await setup_platform(
+        hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+    )
+    await hass.async_block_till_done()
+
+    # Initially, no issue must exist.
+    issue_registry = ir.async_get(hass)
+    assert issue_registry.async_get_issue(DOMAIN, ISSUE_INVALID_ZONE_SCHEDULE) is None
+
+    coordinator: RemehaUpdateCoordinator = mock_config_entry.runtime_data["coordinator"]
+
+    # Update a schedule register with an incorrect value.
+    remeha_modbus_unit.holding[689 + REMEHA_ZONE_RESERVED_REGISTERS] = 0xA105
+
+    # And force a coordinator refresh
+    await coordinator.async_refresh()
+
+    # Assert that an issue has been created
+    issues = await get_repairs(hass, hass_ws_client)
+    assert issues
+    assert issue_registry.async_get_issue(DOMAIN, ISSUE_INVALID_ZONE_SCHEDULE) is not None
+
+    # Set correct value in registers and force coordinator refresh
+    remeha_modbus_unit.holding[689 + REMEHA_ZONE_RESERVED_REGISTERS] = 0x01A0
+    await coordinator.async_refresh()
+
+    # The issue must be gone.
+    assert issue_registry.async_get_issue(DOMAIN, ISSUE_INVALID_ZONE_SCHEDULE) is None
+
+
+async def test_undo_manual_schedule_execution_repair(
+    hass: HomeAssistant,
+    remeha_api,
+    mock_config_entry,
+    hass_client,
+    hass_ws_client,
+    remeha_modbus_unit,
+):
+    """Test repairing/resetting `switch.heatpump_managed_schedules`."""
+
+    with patch(
+        "aio_remeha_modbus.gtw08.GTW08",
+        new=lambda *args, **kwargs: remeha_api,
+    ):
+        # Start remeha_modbus
+        await setup_platform(
+            hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+        )
+        await hass.async_block_till_done()
+
+        entity_id = f"{SwitchDomain}.{HEATPUMP_MANAGED_SCHEDULES}"
+
+        # Switch must be on by default
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == STATE_ON
+
+        # Retrieve the current DHW climate preset.
+        climate_entity_id = get_climate_entity_id(hass, 2)
+        state = hass.states.get(climate_entity_id)
+        assert state is not None
+        original_preset = state.attributes[ATTR_PRESET_MODE]
+
+        # Turn the switch off
+        await hass.services.async_call(
+            domain=SwitchDomain, service=SERVICE_TURN_OFF, target={ATTR_ENTITY_ID: entity_id}
+        )
+
+        # Switch must be off now
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == STATE_OFF
+
+        # DHW climate must be set to preset=ECO as a result.
+        state = hass.states.get(climate_entity_id)
+        assert state is not None
+        assert state.attributes[ATTR_PRESET_MODE] == PRESET_ECO
+
+        # Start repair fix flow
+        issue_registry = ir.async_get(hass)
+        issues = await get_repairs(hass, hass_ws_client)
+        assert issues
+        assert (
+            issue_registry.async_get_issue(DOMAIN, ISSUE_HEATPUMP_MANAGED_SCHEDULES_OFF) is not None
+        )
+
+        client = await hass_client()
+        data = await start_repair_fix_flow(client, DOMAIN, ISSUE_HEATPUMP_MANAGED_SCHEDULES_OFF)
+
+        flow_id = data["flow_id"]
+        assert data["type"] == FlowResultType.FORM
+        assert data["step_id"] == "confirm_undo"
+
+        # Issue must have been removed
+        data = await process_repair_fix_flow(client, flow_id, json={})
+        assert data["type"] == FlowResultType.CREATE_ENTRY
+        await hass.async_block_till_done()
+        assert issue_registry.async_get_issue(DOMAIN, ISSUE_HEATPUMP_MANAGED_SCHEDULES_OFF) is None
+
+        # Switch is back on
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert state.state == STATE_ON
+
+        # And climate is back to previous state
+        state = hass.states.get(climate_entity_id)
+        assert state is not None
+        assert state.attributes[ATTR_PRESET_MODE] == original_preset

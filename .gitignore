@@ -58,6 +58,9 @@ ozw_log.txt
 # .nfs files are created when an open file is removed but is still being accessed
 .nfs*
 
+### MacOS ###
+.DS_Store
+
 ### Python ###
 # Byte-compiled / optimized / DLL files
 __pycache__/
@@ -261,8 +264,10 @@ config/.ha_run.lock
 config/blueprints/**
 pytest-coverage.txt
 junit-coverage.xml
+config/automations.yaml
 config/custom_components
 config/www/community
 custom_components/hacs
+config/www/scheduler-card/**
 # pycharm
 .idea

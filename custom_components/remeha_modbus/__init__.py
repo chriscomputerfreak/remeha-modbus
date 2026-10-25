@@ -1,34 +1,48 @@
 """The Remeha Modbus integration."""
 
 import logging
+from typing import TYPE_CHECKING
 
+from aio_remeha_modbus.gtw08 import GTW08
+from aio_remeha_modbus.helpers.modbus import RetryingModbusUnit
 from dateutil import tz
-from homeassistant.config_entries import (
-    ConfigEntry,
-    ConfigEntryError,
-    ConfigEntryNotReady,
-)
-from homeassistant.const import CONF_NAME, CONF_TYPE, Platform
-from homeassistant.core import HomeAssistant
-from pymodbus import ModbusException
+from homeassistant.components.modbus import async_get_unit
+from homeassistant.components.modbus.const import RTUOVERTCP, SERIAL, TCP, UDP
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import CONF_NAME, CONF_TYPE, EVENT_HOMEASSISTANT_STARTED, Platform
+from homeassistant.core import Event, HomeAssistant
+from homeassistant.exceptions import ConfigEntryError, ConfigEntryNotReady
+from homeassistant.helpers.device_registry import DeviceEntry
+from homeassistant.helpers.typing import NoEventData
 
-from custom_components.remeha_modbus.api import (
-    ConnectionType,
-    RemehaApi,
-)
+from custom_components.remeha_modbus.api.store import RemehaModbusStorage
+from custom_components.remeha_modbus.helpers.config import to_modbus_params
+
+if TYPE_CHECKING:
+    from custom_components.remeha_modbus.blend.blender import Blender
+
 from custom_components.remeha_modbus.const import (
     AUTO_SCHEDULE_SELECTED_SCHEDULE,
     CONFIG_AUTO_SCHEDULE,
+    DOMAIN,
+    ISSUE_CONFIG_ENTRY_KEY_ERROR,
     REMEHA_PRESET_SCHEDULE_1,
+    SERVICE_BOOTSTRAP_BLENDERS,
 )
 from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
 from custom_components.remeha_modbus.services import register_services
 
+CONNECTION_TYPES = [TCP, UDP, RTUOVERTCP, SERIAL]
+"""The support modbus connection types."""
+
 PLATFORMS: list[Platform] = [
+    Platform.BINARY_SENSOR,
     Platform.CLIMATE,
     Platform.NUMBER,
+    Platform.SELECT,
     Platform.SENSOR,
-    Platform.BINARY_SENSOR,
+    Platform.SWITCH,
+    Platform.TIME,
 ]
 
 _LOGGER = logging.getLogger(__name__)
@@ -40,34 +54,57 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     modbus_hub_name = entry.data[CONF_NAME]
     modbus_type = entry.data[CONF_TYPE]
 
-    if modbus_type not in ConnectionType:
-        connection_types: str = ", ".join(e.value for e in ConnectionType)
+    if modbus_type not in CONNECTION_TYPES:
+        connection_types: str = ", ".join(CONNECTION_TYPES)
         raise ConfigEntryError(
             f"{modbus_type} is not a valid connection type. Use one of [{connection_types}]"
         )
 
-    api: RemehaApi = RemehaApi.create(
-        name=modbus_hub_name, config=entry.data, time_zone=tz.gettz(name=hass.config.time_zone)
+    try:
+        params, unit_id = to_modbus_params(entry.data)
+    except KeyError as e:
+        raise ConfigEntryNotReady(
+            translation_domain=DOMAIN,
+            translation_key=ISSUE_CONFIG_ENTRY_KEY_ERROR,
+            translation_placeholders={"key": str(e)},
+        ) from e
+
+    unit = async_get_unit(hass=hass, entry=entry, params=params, unit_id=unit_id)
+
+    api: GTW08 = GTW08(
+        name=modbus_hub_name,
+        unit=RetryingModbusUnit(unit),
+        time_zone=await hass.async_add_executor_job(tz.gettz, hass.config.time_zone),
+        request_timeout=0.5,
     )
 
-    # Ensure the modbus device is reachable and actually talking Modbus
-    # before forwarding setup to other platforms.
-    try:
-        await api.async_connect()
-        await api.async_health_check()
-    except ModbusException as ex:
-        raise ConfigEntryNotReady(f"Error while executing modbus health check: {ex}") from ex
+    # Setup the coordinator
+    coordinator = RemehaUpdateCoordinator(
+        hass=hass, config_entry=entry, api=api, store=RemehaModbusStorage(hass=hass)
+    )
+    entry.runtime_data = {"api": api, "coordinator": coordinator, "blenders": {}}
 
-    coordinator = RemehaUpdateCoordinator(hass=hass, config_entry=entry, api=api)
+    # Services must be registered before the first data retrieval, since they're
+    # called if something fails when retrieving the data.
+    register_services(hass=hass, config=entry, coordinator=coordinator)
 
+    # Retrieve the first batch of data.
     await coordinator.async_config_entry_first_refresh()
 
-    entry.runtime_data = {"api": api, "coordinator": coordinator}
-
+    # And setup all platforms after the data is available.
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
 
-    # Register services only if everything else has been set up ssuccessfully.
-    register_services(hass=hass, config=entry, coordinator=coordinator)
+    # After HA has started, bootstrap the blenders.
+    async def _bootstrap_blenders(_: Event[NoEventData]) -> None:
+        """Call the bootstrap_blenders service to set up communication with other integrations."""
+        await hass.services.async_call(
+            domain=DOMAIN,
+            service=SERVICE_BOOTSTRAP_BLENDERS,
+            blocking=False,
+            return_response=False,
+        )
+
+    hass.bus.async_listen_once(event_type=EVENT_HOMEASSISTANT_STARTED, listener=_bootstrap_blenders)
 
     return True
 
@@ -78,6 +115,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Close the connection to the modbus server.
     coordinator: RemehaUpdateCoordinator = entry.runtime_data["coordinator"]
     await coordinator.async_shutdown()
+
+    # Unsubscribe from all subscriptions any blender might have.
+    blenders: dict[str, Blender] = entry.runtime_data["blenders"]
+    for blender in blenders.values():
+        blender.unblend()
+
+    # TODO remove any automations related to our entities?
 
     return await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
 
@@ -117,3 +161,21 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     )
 
     return True
+
+
+async def async_remove_config_entry_device(
+    hass: HomeAssistant, config_entry: ConfigEntry, device_entry: DeviceEntry
+) -> bool:
+    """Allow deleting a device from the UI if the integration no longer provides it.
+
+    A device may become stale after the appliance topology changes or after an
+    upgrade that alters how device identifiers are built. Such devices carry no
+    entities and can be removed. Devices that still map to a known board are kept.
+    """
+
+    coordinator: RemehaUpdateCoordinator = config_entry.runtime_data["coordinator"]
+    known_identifiers = {
+        (DOMAIN, str(device.article_number)) for device in coordinator.get_devices()
+    }
+
+    return not device_entry.identifiers & known_identifiers

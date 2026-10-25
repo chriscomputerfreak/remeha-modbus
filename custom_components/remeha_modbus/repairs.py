@@ -1,0 +1,188 @@
+"""Repairs for Remeha Modbus."""
+
+import logging
+from typing import TYPE_CHECKING, Any, cast
+
+import probatio
+from homeassistant.components.climate.const import DOMAIN as ClimateDomain
+from homeassistant.components.climate.const import SERVICE_SET_PRESET_MODE
+from homeassistant.components.homeassistant.const import SERVICE_HOMEASSISTANT_RESTART
+from homeassistant.components.repairs import RepairsFlow, RepairsFlowResult
+from homeassistant.components.switch.const import DOMAIN as SwitchDomain
+from homeassistant.core import DOMAIN as HA_DOMAIN
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers import issue_registry as ir
+
+from custom_components.remeha_modbus.const import (
+    DOMAIN,
+    ISSUE_DISCOVERY_TABLE_CORRUPTED,
+    ISSUE_HEATPUMP_MANAGED_SCHEDULES_OFF,
+    ISSUE_INVALID_ZONE_SCHEDULE,
+    SERVICE_FORCE_SYSTEM_REDISCOVERY,
+)
+
+if TYPE_CHECKING:
+    from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
+
+_LOGGER = logging.getLogger(__name__)
+
+
+class DiscoveryTableCorruptedFixFlow(RepairsFlow):
+    """A flow to repair a corrupted modbus discovery table."""
+
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
+        """Handle the initial step."""
+
+        return await self.async_step_confirm_force_rediscovery()
+
+    async def async_step_confirm_force_rediscovery(
+        self, user_input: dict[str, str] | None = None
+    ) -> RepairsFlowResult:
+        """Have the user confirm they want to force modbus rediscovery."""
+
+        if user_input is not None:
+            await self.hass.services.async_call(
+                domain=DOMAIN, service=SERVICE_FORCE_SYSTEM_REDISCOVERY
+            )
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(
+            step_id="confirm_force_rediscovery", data_schema=probatio.Schema({})
+        )
+
+
+class InvalidZoneScheduleFixFlow(RepairsFlow):
+    """Fix invalid zone schedule by overwriting it with a default schedule."""
+
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
+        """Handle the initial step."""
+
+        return await self.async_step_confirm_overwrite()
+
+    async def async_step_confirm_overwrite(
+        self, user_input: dict[str, str] | None = None
+    ) -> RepairsFlowResult:
+        """Have the user confirm whether they want to fix the issue.
+
+        Fixing the issue means overwriting the faulty zone schedule with a default one.
+        """
+        if user_input is not None:
+            registry = ir.async_get(self.hass)
+            issue = registry.async_get_issue(domain=DOMAIN, issue_id=self.issue_id)
+
+            if issue is None:
+                _LOGGER.warning(
+                    "Cannot repair issue by writing default schedule: issue with id %s not found",
+                    self.issue_id,
+                )
+            else:
+                config_entry = next(iter(self.hass.config_entries.async_entries(DOMAIN)))
+                coordinator: RemehaUpdateCoordinator = config_entry.runtime_data["coordinator"]
+
+                # Don't use an HA service here, because that would require an entity_id.
+                # If this issue occurs during the first data fetch, no entities are available yet.
+                # We can't detect which zone/schedule caused the issue, so each day schedule
+                # that cannot be parsed is overwritten with a default one.
+                await coordinator.async_repair_invalid_schedules()
+                ir.async_delete_issue(self.hass, DOMAIN, self.issue_id)
+
+                return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(step_id="confirm_overwrite", data_schema=probatio.Schema({}))
+
+
+class RestartRequiredFixFlow(RepairsFlow):
+    """Implementation of the restart repair fix."""
+
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
+        """Handle the initial step."""
+
+        return await self.async_step_confirm_restart()
+
+    async def async_step_confirm_restart(
+        self, user_input: dict[str, str] | None = None
+    ) -> RepairsFlowResult:
+        """Allow the user to restart HA."""
+
+        if user_input is not None:
+            await self.hass.services.async_call(
+                domain=HA_DOMAIN, service=SERVICE_HOMEASSISTANT_RESTART
+            )
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(step_id="confirm_restart", data_schema=probatio.Schema({}))
+
+
+class UndoManualScheduleExecutionFixFlow(RepairsFlow):
+    """Flow to reset the schedule handling to be handled by the heat pump."""
+
+    def __init__(self, issue_id: str) -> None:
+        """Create a new instance."""
+        super().__init__()
+
+        self.issue_id = issue_id
+
+    async def async_step_init(self, user_input: dict[str, str] | None = None) -> RepairsFlowResult:
+        """Handle the initial step."""
+
+        return await self.async_step_confirm_undo()
+
+    async def async_step_confirm_undo(
+        self, user_input: dict[str, str] | None = None
+    ) -> RepairsFlowResult:
+        """Have the user confirm whether they want to reset the schedule handling method."""
+
+        if user_input is not None:
+            registry = ir.async_get(self.hass)
+            issue = registry.async_get_issue(domain=DOMAIN, issue_id=self.issue_id)
+
+            if issue is None:
+                _LOGGER.warning(
+                    "Cannot undo previous action: issue with id %s not found", self.issue_id
+                )
+            elif issue.data is None:
+                _LOGGER.warning("Cannot undo previous action: issue data is missing.")
+            else:
+                switch_entity = cast(str, issue.data["switch"])
+
+                # Let the heat pump manage schhedule execution
+                await self.hass.services.async_call(
+                    domain=SwitchDomain, service="turn_on", target={"entity_id": switch_entity}
+                )
+
+                # Set the preset mode of the related climates.
+                for k, v in issue.data.items():
+                    if k != "switch":
+                        await self.hass.services.async_call(
+                            domain=ClimateDomain,
+                            service=SERVICE_SET_PRESET_MODE,
+                            service_data={"preset_mode": v},
+                            target={"entity_id": k},
+                        )
+            return self.async_create_entry(title="", data={})
+
+        return self.async_show_form(step_id="confirm_undo", data_schema=probatio.Schema({}))
+
+
+async def async_create_fix_flow(
+    hass: HomeAssistant,
+    issue_id: str,
+    data: dict[str, str | int | float | None] | None = None,
+    *args: Any,
+    **kwargs: Any,
+):
+    """Create the correct fix flow, based on issue_id."""
+
+    if issue_id is None:
+        return None
+
+    if issue_id.startswith("restart_required"):
+        return RestartRequiredFixFlow()
+    if issue_id == ISSUE_HEATPUMP_MANAGED_SCHEDULES_OFF:
+        return UndoManualScheduleExecutionFixFlow(issue_id)
+    if issue_id == ISSUE_DISCOVERY_TABLE_CORRUPTED:
+        return DiscoveryTableCorruptedFixFlow()
+    if issue_id == ISSUE_INVALID_ZONE_SCHEDULE:
+        return InvalidZoneScheduleFixFlow()
+
+    return None

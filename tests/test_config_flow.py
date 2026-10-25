@@ -5,20 +5,28 @@ from datetime import timedelta
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from aio_remeha_modbus.gtw08.const import PVSystemOrientation
 from homeassistant import config_entries
+from homeassistant.components.modbus.const import (
+    CONF_BAUDRATE,
+    CONF_BYTESIZE,
+    CONF_PARITY,
+    CONF_STOPBITS,
+    RTUOVERTCP,
+    SERIAL,
+    TCP,
+)
 from homeassistant.components.weather.const import DOMAIN as WeatherDomain
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TYPE
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType, InvalidData
 from homeassistant.helpers.entity_component import EntityComponent
+from modbus_connection.mock import MockModbusUnit
 
 from custom_components.remeha_modbus.const import (
     AUTO_SCHEDULE_SELECTED_SCHEDULE,
     CONFIG_AUTO_SCHEDULE,
-    CONNECTION_RTU_OVER_TCP,
-    CONNECTION_SERIAL,
-    CONNECTION_TCP,
     DHW_BOILER_CONFIG_SECTION,
     DHW_BOILER_ENERGY_LABEL,
     DHW_BOILER_HEAT_LOSS_RATE,
@@ -27,13 +35,9 @@ from custom_components.remeha_modbus.const import (
     HA_CONFIG_MINOR_VERSION,
     HA_CONFIG_VERSION,
     MODBUS_DEVICE_ADDRESS,
-    MODBUS_SERIAL_BAUDRATE,
-    MODBUS_SERIAL_BYTESIZE,
     MODBUS_SERIAL_METHOD,
     MODBUS_SERIAL_METHOD_RTU,
-    MODBUS_SERIAL_PARITY,
     MODBUS_SERIAL_PARITY_NONE,
-    MODBUS_SERIAL_STOPBITS,
     PV_ANNUAL_EFFICIENCY_DECREASE,
     PV_CONFIG_SECTION,
     PV_INSTALLATION_DATE,
@@ -42,9 +46,8 @@ from custom_components.remeha_modbus.const import (
     PV_TILT,
     REMEHA_PRESET_SCHEDULE_1,
     WEATHER_ENTITY_ID,
-    PVSystemOrientation,
 )
-from tests.conftest import MockWeatherEntity, get_api, setup_platform
+from tests.conftest import MockWeatherEntity, setup_platform
 
 
 async def test_generic_config_invalid_data(
@@ -55,8 +58,8 @@ async def test_generic_config_invalid_data(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {}
+    assert result.get("type") is FlowResultType.FORM
+    assert result.get("errors") == {}
 
     with pytest.raises(InvalidData):
         # Fill in the form correctly
@@ -64,7 +67,7 @@ async def test_generic_config_invalid_data(
             result["flow_id"],
             {
                 CONF_NAME: "test_serial_modbus_hub",
-                CONF_TYPE: CONNECTION_SERIAL,
+                CONF_TYPE: SERIAL,
                 MODBUS_DEVICE_ADDRESS: "not-a-number",
             },
         )
@@ -72,86 +75,98 @@ async def test_generic_config_invalid_data(
     await hass.async_block_till_done()
 
 
-async def test_config_modbus_serial(hass: HomeAssistant, mock_setup_entry: AsyncMock) -> None:
+async def test_config_modbus_serial(
+    hass: HomeAssistant, mock_setup_entry: AsyncMock, mock_modbus_unit: MockModbusUnit
+) -> None:
     """Test for modbus serial configuration setup."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {}
+    assert result.get("type") is FlowResultType.FORM
+    assert result.get("errors") == {}
 
     # Fill in the form correctly
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_NAME: "test_serial_modbus_hub", CONF_TYPE: CONNECTION_SERIAL},
+        {CONF_NAME: "test_serial_modbus_hub", CONF_TYPE: SERIAL},
     )
     await hass.async_block_till_done()
 
     # We should have been presented with the 2nd form, to fill in the
     # serial connection details.
-    assert result["type"] is FlowResultType.FORM
+    assert result.get("type") is FlowResultType.FORM
 
     # Fill in the details, check the result.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
-            MODBUS_SERIAL_BAUDRATE: 9600,
-            MODBUS_SERIAL_BYTESIZE: 8,
-            MODBUS_SERIAL_METHOD: MODBUS_SERIAL_METHOD_RTU,
-            MODBUS_SERIAL_PARITY: MODBUS_SERIAL_PARITY_NONE,
-            CONF_PORT: "/dev/ttyUSB0",
-            MODBUS_SERIAL_STOPBITS: 2,
-        },
-    )
+    with patch(
+        "modbus_connection.tmodbus.TmodbusUnit",
+        new=lambda *args, **kwargs: mock_modbus_unit,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_BAUDRATE: 9600,
+                CONF_BYTESIZE: 8,
+                MODBUS_SERIAL_METHOD: MODBUS_SERIAL_METHOD_RTU,
+                CONF_PARITY: MODBUS_SERIAL_PARITY_NONE,
+                CONF_PORT: "/dev/ttyUSB0",
+                CONF_STOPBITS: 2,
+            },
+        )
     await hass.async_block_till_done()
 
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Remeha Modbus"
-    assert result["data"] == {
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    assert result.get("title") == "Remeha Modbus"
+    assert result.get("data") == {
         CONF_NAME: "test_serial_modbus_hub",
-        CONF_TYPE: CONNECTION_SERIAL,
+        CONF_TYPE: SERIAL,
         MODBUS_DEVICE_ADDRESS: 100,
-        MODBUS_SERIAL_BAUDRATE: 9600,
-        MODBUS_SERIAL_BYTESIZE: 8,
+        CONF_BAUDRATE: 9600,
+        CONF_BYTESIZE: 8,
         MODBUS_SERIAL_METHOD: MODBUS_SERIAL_METHOD_RTU,
-        MODBUS_SERIAL_PARITY: MODBUS_SERIAL_PARITY_NONE,
+        CONF_PARITY: MODBUS_SERIAL_PARITY_NONE,
         CONF_PORT: "/dev/ttyUSB0",
-        MODBUS_SERIAL_STOPBITS: 2,
+        CONF_STOPBITS: 2,
         CONFIG_AUTO_SCHEDULE: False,
     }
     assert len(mock_setup_entry.mock_calls) == 1
 
 
-async def test_config_modbus_socket(hass: HomeAssistant, mock_setup_entry: AsyncMock) -> None:
+async def test_config_modbus_socket(
+    hass: HomeAssistant, mock_setup_entry: AsyncMock, mock_modbus_unit: MockModbusUnit
+) -> None:
     """Test for modbus socket configuration setup."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {}
+    assert result.get("type") is FlowResultType.FORM
+    assert result.get("errors") == {}
 
     # Fill in the form with a socket modbus connection type.
     result = await hass.config_entries.flow.async_configure(
         result["flow_id"],
-        {CONF_NAME: "test_socket_modbus_hub", CONF_TYPE: CONNECTION_RTU_OVER_TCP},
+        {CONF_NAME: "test_socket_modbus_hub", CONF_TYPE: RTUOVERTCP},
     )
     await hass.async_block_till_done()
 
     # We should have been presented with the 2nd form, to fill in the
     # socket connection details.
-    assert result["type"] is FlowResultType.FORM
+    assert result.get("type") is FlowResultType.FORM
 
     # Fill in the details, check the result.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_HOST: "192.168.1.1", CONF_PORT: 502}
-    )
+    with patch(
+        "modbus_connection.tmodbus.TmodbusUnit",
+        new=lambda *args, **kwargs: mock_modbus_unit,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: "192.168.1.1", CONF_PORT: 502}
+        )
     await hass.async_block_till_done()
 
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Remeha Modbus"
-    assert result["data"] == {
+    assert result.get("type") is FlowResultType.CREATE_ENTRY
+    assert result.get("title") == "Remeha Modbus"
+    assert result.get("data") == {
         CONF_NAME: "test_socket_modbus_hub",
-        CONF_TYPE: CONNECTION_RTU_OVER_TCP,
+        CONF_TYPE: RTUOVERTCP,
         MODBUS_DEVICE_ADDRESS: 100,
         CONF_HOST: "192.168.1.1",
         CONF_PORT: 502,
@@ -160,34 +175,75 @@ async def test_config_modbus_socket(hass: HomeAssistant, mock_setup_entry: Async
     assert len(mock_setup_entry.mock_calls) == 1
 
 
-async def test_config_auto_scheduling(hass: HomeAssistant, mock_setup_entry: AsyncMock) -> None:
+async def test_config_auto_scheduling(
+    hass: HomeAssistant, mock_setup_entry: AsyncMock, mock_modbus_unit
+) -> None:
     """Test for modbus socket configuration setup with auto scheduling."""
 
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {}
+    assert result.get("type") is FlowResultType.FORM
+    assert result.get("errors") == {}
 
     # Fill in the form with a socket modbus connection type.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
+    with patch(
+        "modbus_connection.tmodbus.TmodbusUnit",
+        new=lambda *args, **kwargs: mock_modbus_unit,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "test_socket_modbus_hub",
+                CONF_TYPE: RTUOVERTCP,
+                CONFIG_AUTO_SCHEDULE: True,
+            },
+        )
+        await hass.async_block_till_done()
+
+        # We should have been presented with the 2nd form, to fill in the
+        # auto schedule details.
+        assert result.get("type") is FlowResultType.FORM
+
+        # Fill in the details, check the result.
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                WEATHER_ENTITY_ID: "weather.fake_weather",
+                AUTO_SCHEDULE_SELECTED_SCHEDULE: REMEHA_PRESET_SCHEDULE_1,
+                PV_CONFIG_SECTION: {
+                    PV_NOMINAL_POWER_WP: 1375,
+                    PV_ORIENTATION: PVSystemOrientation.SOUTH,
+                    PV_TILT: 30,
+                    PV_ANNUAL_EFFICIENCY_DECREASE: 0.54,
+                    PV_INSTALLATION_DATE: "2025-03-14",
+                },
+                DHW_BOILER_CONFIG_SECTION: {
+                    DHW_BOILER_VOLUME: 300,
+                    DHW_BOILER_HEAT_LOSS_RATE: 2.19,
+                },
+            },
+        )
+
+        # We should have been presented with the 3rd form, to fill in the
+        # socket connection details.
+        assert "type" in result and result.get("type") is FlowResultType.FORM
+
+        # Fill in the details, check the result.
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: "192.168.1.1", CONF_PORT: 502}
+        )
+        await hass.async_block_till_done()
+
+        assert result.get("type") is FlowResultType.CREATE_ENTRY
+        assert result.get("title") == "Remeha Modbus"
+        assert result.get("data") == {
             CONF_NAME: "test_socket_modbus_hub",
-            CONF_TYPE: CONNECTION_RTU_OVER_TCP,
+            CONF_TYPE: RTUOVERTCP,
+            MODBUS_DEVICE_ADDRESS: 100,
+            CONF_HOST: "192.168.1.1",
+            CONF_PORT: 502,
             CONFIG_AUTO_SCHEDULE: True,
-        },
-    )
-    await hass.async_block_till_done()
-
-    # We should have been presented with the 2nd form, to fill in the
-    # auto schedule details.
-    assert result["type"] is FlowResultType.FORM
-
-    # Fill in the details, check the result.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
             WEATHER_ENTITY_ID: "weather.fake_weather",
             AUTO_SCHEDULE_SELECTED_SCHEDULE: REMEHA_PRESET_SCHEDULE_1,
             PV_CONFIG_SECTION: {
@@ -200,49 +256,14 @@ async def test_config_auto_scheduling(hass: HomeAssistant, mock_setup_entry: Asy
             DHW_BOILER_CONFIG_SECTION: {
                 DHW_BOILER_VOLUME: 300,
                 DHW_BOILER_HEAT_LOSS_RATE: 2.19,
+                DHW_BOILER_ENERGY_LABEL: None,
             },
-        },
-    )
-
-    # We should have been presented with the 3rd form, to fill in the
-    # socket connection details.
-    assert result["type"] is FlowResultType.FORM
-
-    # Fill in the details, check the result.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_HOST: "192.168.1.1", CONF_PORT: 502}
-    )
-    await hass.async_block_till_done()
-
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Remeha Modbus"
-    assert result["data"] == {
-        CONF_NAME: "test_socket_modbus_hub",
-        CONF_TYPE: CONNECTION_RTU_OVER_TCP,
-        MODBUS_DEVICE_ADDRESS: 100,
-        CONF_HOST: "192.168.1.1",
-        CONF_PORT: 502,
-        CONFIG_AUTO_SCHEDULE: True,
-        WEATHER_ENTITY_ID: "weather.fake_weather",
-        AUTO_SCHEDULE_SELECTED_SCHEDULE: REMEHA_PRESET_SCHEDULE_1,
-        PV_CONFIG_SECTION: {
-            PV_NOMINAL_POWER_WP: 1375,
-            PV_ORIENTATION: PVSystemOrientation.SOUTH,
-            PV_TILT: 30,
-            PV_ANNUAL_EFFICIENCY_DECREASE: 0.54,
-            PV_INSTALLATION_DATE: "2025-03-14",
-        },
-        DHW_BOILER_CONFIG_SECTION: {
-            DHW_BOILER_VOLUME: 300,
-            DHW_BOILER_HEAT_LOSS_RATE: 2.19,
-            DHW_BOILER_ENERGY_LABEL: None,
-        },
-    }
-    assert len(mock_setup_entry.mock_calls) == 1
+        }
+        assert len(mock_setup_entry.mock_calls) == 1
 
 
 async def test_config_auto_scheduling_no_installation_date(
-    hass: HomeAssistant, mock_setup_entry: AsyncMock
+    hass: HomeAssistant, mock_setup_entry: AsyncMock, mock_modbus_unit
 ) -> None:
     """Test for modbus socket configuration setup with auto scheduling without a pv installation date."""
 
@@ -264,92 +285,102 @@ async def test_config_auto_scheduling_no_installation_date(
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": config_entries.SOURCE_USER}
     )
-    assert result["type"] is FlowResultType.FORM
-    assert result["errors"] == {}
+    assert result.get("type") is FlowResultType.FORM
+    assert result.get("errors") == {}
 
     # Fill in the form with a socket modbus connection type.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
+    with patch(
+        "modbus_connection.tmodbus.TmodbusUnit",
+        new=lambda *args, **kwargs: mock_modbus_unit,
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                CONF_NAME: "test_socket_modbus_hub",
+                CONF_TYPE: RTUOVERTCP,
+                CONFIG_AUTO_SCHEDULE: True,
+            },
+        )
+        await hass.async_block_till_done()
+
+        # We should have been presented with the 2nd form, to fill in the
+        # auto schedule details.
+        assert result.get("type") is FlowResultType.FORM
+
+        # Fill in the details, check the result.
+        # Leave out AUTO_SCHEDULE_SELECTED_SCHEDULE, since it has a default value.
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"],
+            {
+                WEATHER_ENTITY_ID: "weather.fake_weather",
+                PV_CONFIG_SECTION: {
+                    PV_NOMINAL_POWER_WP: 1375,
+                    PV_ORIENTATION: PVSystemOrientation.SOUTH,
+                    PV_TILT: 30,
+                    PV_ANNUAL_EFFICIENCY_DECREASE: 0.54,
+                },
+                DHW_BOILER_CONFIG_SECTION: {
+                    DHW_BOILER_VOLUME: 300,
+                    DHW_BOILER_HEAT_LOSS_RATE: 2.19,
+                },
+            },
+        )
+
+        # We should have been presented with the 3rd form, to fill in the
+        # socket connection details.
+        assert result.get("type") is FlowResultType.FORM
+
+        # Fill in the details, check the result.
+        result = await hass.config_entries.flow.async_configure(
+            result["flow_id"], {CONF_HOST: "192.168.1.1", CONF_PORT: 502}
+        )
+        await hass.async_block_till_done()
+
+        assert result.get("type") is FlowResultType.CREATE_ENTRY
+        assert result.get("title") == "Remeha Modbus"
+        assert result.get("data") == {
             CONF_NAME: "test_socket_modbus_hub",
-            CONF_TYPE: CONNECTION_RTU_OVER_TCP,
+            CONF_TYPE: RTUOVERTCP,
+            MODBUS_DEVICE_ADDRESS: 100,
+            CONF_HOST: "192.168.1.1",
+            CONF_PORT: 502,
             CONFIG_AUTO_SCHEDULE: True,
-        },
-    )
-    await hass.async_block_till_done()
-
-    # We should have been presented with the 2nd form, to fill in the
-    # auto schedule details.
-    assert result["type"] is FlowResultType.FORM
-
-    # Fill in the details, check the result.
-    # Leave out AUTO_SCHEDULE_SELECTED_SCHEDULE, since it has a default value.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        {
             WEATHER_ENTITY_ID: "weather.fake_weather",
+            AUTO_SCHEDULE_SELECTED_SCHEDULE: REMEHA_PRESET_SCHEDULE_1,
             PV_CONFIG_SECTION: {
                 PV_NOMINAL_POWER_WP: 1375,
-                PV_ORIENTATION: PVSystemOrientation.SOUTH,
+                PV_ORIENTATION: "S",
                 PV_TILT: 30,
                 PV_ANNUAL_EFFICIENCY_DECREASE: 0.54,
+                PV_INSTALLATION_DATE: None,
             },
             DHW_BOILER_CONFIG_SECTION: {
                 DHW_BOILER_VOLUME: 300,
                 DHW_BOILER_HEAT_LOSS_RATE: 2.19,
+                DHW_BOILER_ENERGY_LABEL: None,
             },
-        },
-    )
-
-    # We should have been presented with the 3rd form, to fill in the
-    # socket connection details.
-    assert result["type"] is FlowResultType.FORM
-
-    # Fill in the details, check the result.
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"], {CONF_HOST: "192.168.1.1", CONF_PORT: 502}
-    )
-    await hass.async_block_till_done()
-
-    assert result["type"] is FlowResultType.CREATE_ENTRY
-    assert result["title"] == "Remeha Modbus"
-    assert result["data"] == {
-        CONF_NAME: "test_socket_modbus_hub",
-        CONF_TYPE: CONNECTION_RTU_OVER_TCP,
-        MODBUS_DEVICE_ADDRESS: 100,
-        CONF_HOST: "192.168.1.1",
-        CONF_PORT: 502,
-        CONFIG_AUTO_SCHEDULE: True,
-        WEATHER_ENTITY_ID: "weather.fake_weather",
-        AUTO_SCHEDULE_SELECTED_SCHEDULE: REMEHA_PRESET_SCHEDULE_1,
-        PV_CONFIG_SECTION: {
-            PV_NOMINAL_POWER_WP: 1375,
-            PV_ORIENTATION: "S",
-            PV_TILT: 30,
-            PV_ANNUAL_EFFICIENCY_DECREASE: 0.54,
-            PV_INSTALLATION_DATE: None,
-        },
-        DHW_BOILER_CONFIG_SECTION: {
-            DHW_BOILER_VOLUME: 300,
-            DHW_BOILER_HEAT_LOSS_RATE: 2.19,
-            DHW_BOILER_ENERGY_LABEL: None,
-        },
-    }
-    assert len(mock_setup_entry.mock_calls) == 1
+        }
+        assert len(mock_setup_entry.mock_calls) == 1
 
 
-@pytest.mark.parametrize("mock_modbus_client", ["modbus_store.json"], indirect=True)
 async def test_reconfigure_non_unique_id(
-    hass: HomeAssistant, mock_modbus_client, mock_config_entry
+    hass: HomeAssistant, remeha_api, mock_config_entry, remeha_modbus_unit
 ) -> None:
     """Test that reconfiguring the modbus connection fails if the hub name is changed as well."""
-    api = get_api(mock_modbus_client=mock_modbus_client)
-    with patch(
-        "custom_components.remeha_modbus.api.RemehaApi.create",
-        new=lambda *args, **kwargs: api,
+
+    with (
+        patch(
+            "aio_remeha_modbus.gtw08.GTW08",
+            new=lambda *args, **kwargs: remeha_api,
+        ),
+        patch(
+            "modbus_connection.tmodbus.TmodbusUnit", new=lambda *args, **kwargs: remeha_modbus_unit
+        ),
     ):
         # First setup the platform with the mocked ConfigEntry
-        await setup_platform(hass=hass, config_entry=mock_config_entry)
+        await setup_platform(
+            hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+        )
         await hass.async_block_till_done()
 
         entries = hass.config_entries.async_entries(domain=DOMAIN)
@@ -365,17 +396,15 @@ async def test_reconfigure_non_unique_id(
                 "entry_id": config_entry.entry_id,
             },
         )
-        assert result["type"] == FlowResultType.FORM
-        assert result["errors"] == {}
+        assert result.get("type") == FlowResultType.FORM
+        assert result.get("errors") == {}
 
-        result = await hass.config_entries.flow.async_configure(
-            result["flow_id"], {CONF_TYPE: CONNECTION_TCP}
-        )
+        result = await hass.config_entries.flow.async_configure(result["flow_id"], {CONF_TYPE: TCP})
         await hass.async_block_till_done()
 
         # We should have been presented with the 2nd form, to fill in the
         # socket connection details.
-        assert result["type"] is FlowResultType.FORM
+        assert result.get("type") is FlowResultType.FORM
 
         # Fill in the details, check the result.
         result = await hass.config_entries.flow.async_configure(
@@ -383,7 +412,7 @@ async def test_reconfigure_non_unique_id(
         )
         await hass.async_block_till_done()
 
-        assert result["type"] is FlowResultType.ABORT
+        assert result.get("type") is FlowResultType.ABORT
 
         entries = hass.config_entries.async_entries(domain=DOMAIN)
 
@@ -394,7 +423,7 @@ async def test_reconfigure_non_unique_id(
         config_entry = entries[0]
         assert config_entry.data == {
             CONF_NAME: "test_hub",
-            CONF_TYPE: CONNECTION_TCP,
+            CONF_TYPE: TCP,
             MODBUS_DEVICE_ADDRESS: 100,
             CONF_HOST: "also.does.not.matter",
             CONF_PORT: 502,
@@ -402,23 +431,23 @@ async def test_reconfigure_non_unique_id(
         }
 
 
-@pytest.mark.parametrize("mock_modbus_client", ["modbus_store.json"], indirect=True)
 @pytest.mark.parametrize("mock_config_entry", [{"version": 1, "minor_version": 0}], indirect=True)
 async def test_migrate_from_config_v1_0(
-    hass: HomeAssistant, mock_modbus_client, mock_config_entry
+    hass: HomeAssistant, remeha_api, mock_config_entry, remeha_modbus_unit
 ) -> None:
     """Test the migration of config v1.0 to whatever the current version is."""
 
     assert mock_config_entry.version == 1
     assert mock_config_entry.minor_version == 0
 
-    api = get_api(mock_modbus_client=mock_modbus_client)
     with patch(
-        "custom_components.remeha_modbus.api.RemehaApi.create",
-        new=lambda *args, **kwargs: api,
+        "aio_remeha_modbus.gtw08.GTW08",
+        new=lambda *args, **kwargs: remeha_api,
     ):
         # First setup the platform with the mocked ConfigEntry
-        await setup_platform(hass=hass, config_entry=mock_config_entry)
+        await setup_platform(
+            hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+        )
         await hass.async_block_till_done()
 
         entries = hass.config_entries.async_entries(domain=DOMAIN)

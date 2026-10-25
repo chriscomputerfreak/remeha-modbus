@@ -1,11 +1,27 @@
 """Config flow for the Remeha Modbus integration."""
 
-from __future__ import annotations
-
 import logging
+from types import MappingProxyType
 from typing import Any
 
-import voluptuous as vol
+import probatio
+from aio_remeha_modbus.gtw08.const import (
+    PV_MAX_TILT_DEGREES,
+    PV_MIN_TILT_DEGREES,
+    BoilerEnergyLabel,
+    PVSystemOrientation,
+)
+from aio_remeha_modbus.gtw08.errors import RemehaModbusError
+from homeassistant.components.modbus.const import (
+    CONF_BAUDRATE,
+    CONF_BYTESIZE,
+    CONF_PARITY,
+    CONF_STOPBITS,
+    RTUOVERTCP,
+    SERIAL,
+    TCP,
+    UDP,
+)
 from homeassistant.components.weather.const import DOMAIN as WeatherDomain
 from homeassistant.config_entries import (
     SOURCE_RECONFIGURE,
@@ -16,15 +32,11 @@ from homeassistant.config_entries import (
 from homeassistant.const import CONF_HOST, CONF_NAME, CONF_PORT, CONF_TYPE
 from homeassistant.data_entry_flow import section
 from homeassistant.helpers import config_validation as cv
-from homeassistant.helpers.selector import selector
+from homeassistant.helpers.selector import SerialPortSelector, selector
 
 from custom_components.remeha_modbus.const import (
     AUTO_SCHEDULE_SELECTED_SCHEDULE,
     CONFIG_AUTO_SCHEDULE,
-    CONNECTION_RTU_OVER_TCP,
-    CONNECTION_SERIAL,
-    CONNECTION_TCP,
-    CONNECTION_UDP,
     DHW_BOILER_CONFIG_SECTION,
     DHW_BOILER_ENERGY_LABEL,
     DHW_BOILER_HEAT_LOSS_RATE,
@@ -33,21 +45,15 @@ from custom_components.remeha_modbus.const import (
     HA_CONFIG_MINOR_VERSION,
     HA_CONFIG_VERSION,
     MODBUS_DEVICE_ADDRESS,
-    MODBUS_SERIAL_BAUDRATE,
-    MODBUS_SERIAL_BYTESIZE,
     MODBUS_SERIAL_METHOD,
     MODBUS_SERIAL_METHOD_ASCII,
     MODBUS_SERIAL_METHOD_RTU,
-    MODBUS_SERIAL_PARITY,
     MODBUS_SERIAL_PARITY_EVEN,
     MODBUS_SERIAL_PARITY_NONE,
     MODBUS_SERIAL_PARITY_ODD,
-    MODBUS_SERIAL_STOPBITS,
     PV_ANNUAL_EFFICIENCY_DECREASE,
     PV_CONFIG_SECTION,
     PV_INSTALLATION_DATE,
-    PV_MAX_TILT_DEGREES,
-    PV_MIN_TILT_DEGREES,
     PV_NOMINAL_POWER_WP,
     PV_ORIENTATION,
     PV_TILT,
@@ -55,32 +61,33 @@ from custom_components.remeha_modbus.const import (
     REMEHA_PRESET_SCHEDULE_2,
     REMEHA_PRESET_SCHEDULE_3,
     WEATHER_ENTITY_ID,
-    BoilerEnergyLabel,
-    PVSystemOrientation,
 )
-from custom_components.remeha_modbus.helpers import config_validation as remeha_cv
+from custom_components.remeha_modbus.helpers import validation as remeha_cv
+from custom_components.remeha_modbus.helpers.config import async_probe_connection
 
 _LOGGER = logging.getLogger(__name__)
 
 
 # Schema for auto scheduling support
-def _auto_scheduling_schema(current: ConfigEntry | None = None) -> vol.Schema:
-    return vol.Schema(
+def _auto_scheduling_schema(current: ConfigEntry | None = None) -> probatio.Schema:
+    return probatio.Schema(
         {
-            vol.Required(
+            probatio.Required(
                 WEATHER_ENTITY_ID,
-                default=current.data[WEATHER_ENTITY_ID] if current else vol.UNDEFINED,
+                default=current.data[WEATHER_ENTITY_ID] if current else probatio.UNDEFINED,
             ): selector({"entity": {"filter": {"domain": WeatherDomain}}}),
-            vol.Required(
+            probatio.Required(
                 AUTO_SCHEDULE_SELECTED_SCHEDULE,
-                default=current.data[AUTO_SCHEDULE_SELECTED_SCHEDULE]
-                if current
-                else REMEHA_PRESET_SCHEDULE_1,
+                default=(
+                    current.data[AUTO_SCHEDULE_SELECTED_SCHEDULE]
+                    if current
+                    else REMEHA_PRESET_SCHEDULE_1
+                ),
             ): selector(
                 {
                     "select": {
                         "mode": "dropdown",
-                        "translation_key": "select_default_auto_schedule_id",
+                        "translation_key": "schedule_id",
                         "options": [
                             REMEHA_PRESET_SCHEDULE_1,
                             REMEHA_PRESET_SCHEDULE_2,
@@ -89,76 +96,92 @@ def _auto_scheduling_schema(current: ConfigEntry | None = None) -> vol.Schema:
                     }
                 }
             ),
-            vol.Required(PV_CONFIG_SECTION): section(
-                vol.Schema(
+            probatio.Required(PV_CONFIG_SECTION): section(
+                probatio.Schema(
                     {
-                        vol.Required(
+                        probatio.Required(
                             PV_NOMINAL_POWER_WP,
-                            default=current.data[PV_CONFIG_SECTION][PV_NOMINAL_POWER_WP]
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[PV_CONFIG_SECTION][PV_NOMINAL_POWER_WP]
+                                if current
+                                else probatio.UNDEFINED
+                            ),
                         ): cv.positive_int,
-                        vol.Optional(
+                        probatio.Optional(
                             PV_ORIENTATION,
-                            default=current.data[PV_CONFIG_SECTION].get(
-                                PV_ORIENTATION, vol.UNDEFINED
-                            )
-                            if current
-                            else PVSystemOrientation.SOUTH,
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(
+                                    PV_ORIENTATION, probatio.UNDEFINED
+                                )
+                                if current
+                                else PVSystemOrientation.SOUTH
+                            ),
                         ): remeha_cv.str_enum(PVSystemOrientation),
-                        vol.Optional(
+                        probatio.Optional(
                             PV_TILT,
-                            default=current.data[PV_CONFIG_SECTION].get(PV_TILT, vol.UNDEFINED)
-                            if current
-                            else 30.0,
-                        ): vol.All(
-                            vol.Coerce(float),
-                            vol.Range(min=PV_MIN_TILT_DEGREES, max=PV_MAX_TILT_DEGREES),
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(PV_TILT, probatio.UNDEFINED)
+                                if current
+                                else 30.0
+                            ),
+                        ): probatio.All(
+                            probatio.Coerce(float),
+                            probatio.Range(min=PV_MIN_TILT_DEGREES, max=PV_MAX_TILT_DEGREES),
                         ),
-                        vol.Optional(
+                        probatio.Optional(
                             PV_ANNUAL_EFFICIENCY_DECREASE,
-                            default=current.data[PV_CONFIG_SECTION].get(
-                                PV_ANNUAL_EFFICIENCY_DECREASE, vol.UNDEFINED
-                            )
-                            if current
-                            else 0.0,
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(
+                                    PV_ANNUAL_EFFICIENCY_DECREASE, probatio.UNDEFINED
+                                )
+                                if current
+                                else 0.0
+                            ),
                         ): cv.positive_float,
-                        vol.Optional(
+                        probatio.Optional(
                             PV_INSTALLATION_DATE,
-                            default=current.data[PV_CONFIG_SECTION].get(
-                                PV_INSTALLATION_DATE, vol.UNDEFINED
-                            )
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[PV_CONFIG_SECTION].get(
+                                    PV_INSTALLATION_DATE, probatio.UNDEFINED
+                                )
+                                if current
+                                else probatio.UNDEFINED
+                            ),
                         ): selector({"date": {}}),
                     }
                 ),
                 {"collapsed": False},
             ),
-            vol.Required(DHW_BOILER_CONFIG_SECTION): section(
-                vol.Schema(
+            probatio.Required(DHW_BOILER_CONFIG_SECTION): section(
+                probatio.Schema(
                     {
-                        vol.Required(
+                        probatio.Required(
                             DHW_BOILER_VOLUME,
-                            default=current.data[DHW_BOILER_CONFIG_SECTION][DHW_BOILER_VOLUME]
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[DHW_BOILER_CONFIG_SECTION][DHW_BOILER_VOLUME]
+                                if current
+                                else probatio.UNDEFINED
+                            ),
                         ): cv.positive_int,
-                        vol.Optional(
+                        probatio.Optional(
                             DHW_BOILER_HEAT_LOSS_RATE,
-                            default=current.data[DHW_BOILER_CONFIG_SECTION].get(
-                                DHW_BOILER_HEAT_LOSS_RATE, vol.UNDEFINED
-                            )
-                            if current
-                            else 0.0,
+                            default=(
+                                current.data[DHW_BOILER_CONFIG_SECTION].get(
+                                    DHW_BOILER_HEAT_LOSS_RATE, probatio.UNDEFINED
+                                )
+                                if current
+                                else 0.0
+                            ),
                         ): cv.positive_float,
-                        vol.Optional(
+                        probatio.Optional(
                             DHW_BOILER_ENERGY_LABEL,
-                            current.data[DHW_BOILER_CONFIG_SECTION].get(
-                                DHW_BOILER_ENERGY_LABEL, vol.UNDEFINED
-                            )
-                            if current
-                            else vol.UNDEFINED,
+                            default=(
+                                current.data[DHW_BOILER_CONFIG_SECTION].get(
+                                    DHW_BOILER_ENERGY_LABEL, probatio.UNDEFINED
+                                )
+                                if current
+                                else probatio.UNDEFINED
+                            ),
                         ): remeha_cv.str_enum(BoilerEnergyLabel),
                     }
                 ),
@@ -168,59 +191,69 @@ def _auto_scheduling_schema(current: ConfigEntry | None = None) -> vol.Schema:
     )
 
 
-def _modbus_serial_schema(current: ConfigEntry | None = None) -> vol.Schema:
-    return vol.Schema(
+def _modbus_serial_schema(current: ConfigEntry | None = None) -> probatio.Schema:
+    return probatio.Schema(
         {
-            vol.Required(
-                MODBUS_SERIAL_BAUDRATE,
-                default=current.data[MODBUS_SERIAL_BAUDRATE] if current else 115200,
+            probatio.Required(
+                CONF_BAUDRATE,
+                default=current.data[CONF_BAUDRATE]
+                if current and CONF_BAUDRATE in current.data
+                else 115200,
             ): cv.positive_int,
-            vol.Required(
-                MODBUS_SERIAL_BYTESIZE,
-                default=current.data[MODBUS_SERIAL_BYTESIZE] if current else 8,
-            ): vol.All(int, vol.In([5, 6, 7, 8])),
-            vol.Required(
+            probatio.Required(
+                CONF_BYTESIZE,
+                default=current.data[CONF_BYTESIZE]
+                if current and CONF_BYTESIZE in current.data
+                else 8,
+            ): probatio.All(int, probatio.In([5, 6, 7, 8])),
+            probatio.Required(
                 MODBUS_SERIAL_METHOD,
-                default=current.data[MODBUS_SERIAL_METHOD] if current else MODBUS_SERIAL_METHOD_RTU,
-            ): vol.In([MODBUS_SERIAL_METHOD_RTU, MODBUS_SERIAL_METHOD_ASCII]),
-            vol.Required(
-                MODBUS_SERIAL_PARITY,
-                default=current.data[MODBUS_SERIAL_PARITY]
-                if current
-                else MODBUS_SERIAL_PARITY_NONE,
-            ): vol.In(
+                default=current.data[MODBUS_SERIAL_METHOD]
+                if current and MODBUS_SERIAL_METHOD in current.data
+                else MODBUS_SERIAL_METHOD_RTU,
+            ): probatio.In([MODBUS_SERIAL_METHOD_RTU, MODBUS_SERIAL_METHOD_ASCII]),
+            probatio.Required(
+                CONF_PARITY,
+                default=(
+                    current.data[CONF_PARITY]
+                    if current and CONF_PARITY in current.data
+                    else MODBUS_SERIAL_PARITY_NONE
+                ),
+            ): probatio.In(
                 [
                     MODBUS_SERIAL_PARITY_EVEN,
                     MODBUS_SERIAL_PARITY_ODD,
                     MODBUS_SERIAL_PARITY_NONE,
                 ]
             ),
-            vol.Required(
-                CONF_PORT, default=current.data[CONF_PORT] if current else vol.UNDEFINED
-            ): vol.Any(cv.port, cv.string),
-            vol.Required(
-                MODBUS_SERIAL_STOPBITS,
-                default=current.data[MODBUS_SERIAL_STOPBITS] if current else 2,
-            ): vol.All(int, vol.In([1, 2])),
+            probatio.Required(
+                CONF_PORT, default=current.data[CONF_PORT] if current else probatio.UNDEFINED
+            ): SerialPortSelector(),
+            probatio.Required(
+                CONF_STOPBITS,
+                default=current.data[CONF_STOPBITS]
+                if current and CONF_STOPBITS in current.data
+                else 2,
+            ): probatio.All(int, probatio.In([1, 2])),
         }
     )
 
 
-def _modbus_socket_schema(current: ConfigEntry | None = None) -> vol.Schema:
-    return vol.Schema(
+def _modbus_socket_schema(current: ConfigEntry | None = None) -> probatio.Schema:
+    return probatio.Schema(
         {
-            vol.Required(
-                CONF_HOST, default=current.data[CONF_HOST] if current else vol.UNDEFINED
+            probatio.Required(
+                CONF_HOST, default=current.data[CONF_HOST] if current else probatio.UNDEFINED
             ): cv.string,
-            vol.Required(
-                CONF_PORT, default=current.data[CONF_PORT] if current else vol.UNDEFINED
+            probatio.Required(
+                CONF_PORT, default=current.data[CONF_PORT] if current else probatio.UNDEFINED
             ): cv.port,
         }
     )
 
 
 def _validate_modbus_generic_config(data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input that should contain the gemeric modbus configuration."""
+    """Validate the user input that should contain the generic modbus configuration."""
 
     return {
         CONF_NAME: data[CONF_NAME],
@@ -286,7 +319,7 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
                         errors=errors,
                     )
 
-                if self.data[CONF_TYPE] == CONNECTION_SERIAL:
+                if self.data[CONF_TYPE] == SERIAL:
                     return self.async_show_form(
                         step_id="modbus_serial",
                         data_schema=_modbus_serial_schema(),
@@ -301,14 +334,24 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="user",
-            data_schema=vol.Schema(
+            data_schema=probatio.Schema(
                 {
-                    vol.Required(CONF_NAME): cv.string,
-                    vol.Required(CONF_TYPE): vol.In(
-                        [CONNECTION_TCP, CONNECTION_UDP, CONNECTION_RTU_OVER_TCP, CONNECTION_SERIAL]
+                    probatio.Required(CONF_NAME): cv.string,
+                    probatio.Required(CONF_TYPE): selector(
+                        {
+                            "select": {
+                                "translation_key": "modbus_type",
+                                "options": [
+                                    TCP,
+                                    UDP,
+                                    RTUOVERTCP,
+                                    SERIAL,
+                                ],
+                            }
+                        }
                     ),
-                    vol.Required(MODBUS_DEVICE_ADDRESS, default=100): cv.positive_int,
-                    vol.Optional(CONFIG_AUTO_SCHEDULE, default=False): cv.boolean,
+                    probatio.Required(MODBUS_DEVICE_ADDRESS, default=100): cv.positive_int,
+                    probatio.Optional(CONFIG_AUTO_SCHEDULE, default=False): cv.boolean,
                 }
             ),
             errors=errors,
@@ -329,13 +372,15 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
                 errors["base"] = "unknown"
 
-            if self.data[CONF_TYPE] == CONNECTION_SERIAL:
+            if self.data[CONF_TYPE] == SERIAL:
                 return self.async_show_form(
                     step_id="modbus_serial",
                     data_schema=_modbus_serial_schema(
-                        current=self._get_reconfigure_entry()
-                        if self.source == SOURCE_RECONFIGURE
-                        else None
+                        current=(
+                            self._get_reconfigure_entry()
+                            if self.source == SOURCE_RECONFIGURE
+                            else None
+                        )
                     ),
                     errors=errors,
                 )
@@ -343,9 +388,9 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
             return self.async_show_form(
                 step_id="modbus_socket",
                 data_schema=_modbus_socket_schema(
-                    current=self._get_reconfigure_entry()
-                    if self.source == SOURCE_RECONFIGURE
-                    else None
+                    current=(
+                        self._get_reconfigure_entry() if self.source == SOURCE_RECONFIGURE else None
+                    )
                 ),
                 errors=errors,
             )
@@ -359,7 +404,15 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
     ) -> ConfigFlowResult:
         """Configure modbus over a serial connection."""
 
-        if user_input is not None and user_input[MODBUS_SERIAL_BAUDRATE] is not None:
+        errors: dict[str, str] = {}
+        if user_input is not None and user_input[CONF_BAUDRATE] is not None:
+            data = self.data | user_input
+            try:
+                await async_probe_connection(hass=self.hass, data=MappingProxyType(data))
+            except RemehaModbusError as e:
+                _LOGGER.exception("Probing connection failed.", exc_info=e, stack_info=True)
+                errors["base"] = "cannot_connect"
+
             if self.source == SOURCE_RECONFIGURE:
                 return self.async_update_reload_and_abort(
                     self._get_reconfigure_entry(), data_updates=self.data | user_input
@@ -371,6 +424,7 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
             data_schema=_modbus_serial_schema(
                 current=self._get_reconfigure_entry() if self.source == SOURCE_RECONFIGURE else None
             ),
+            errors=errors,
         )
 
     async def async_step_modbus_socket(
@@ -380,11 +434,18 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         errors: dict[str, str] = {}
         if user_input is not None and user_input[CONF_HOST] is not None:
+            data = self.data | user_input
+            try:
+                await async_probe_connection(hass=self.hass, data=MappingProxyType(data))
+            except RemehaModbusError as e:
+                _LOGGER.exception("Probing connection failed.", exc_info=e, stack_info=True)
+                errors["base"] = "cannot_connect"
+
             if self.source == SOURCE_RECONFIGURE:
                 return self.async_update_reload_and_abort(
-                    self._get_reconfigure_entry(), data_updates=self.data | user_input
+                    self._get_reconfigure_entry(), data_updates=data
                 )
-            return self.async_create_entry(title="Remeha Modbus", data=self.data | user_input)
+            return self.async_create_entry(title="Remeha Modbus", data=data)
 
         return self.async_show_form(
             step_id="modbus_socket",
@@ -394,7 +455,7 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
             errors=errors,
         )
 
-    async def async_step_reconfigure(self: ConfigFlow, user_input: dict[str, Any] | None = None):
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None):
         """Reconfigure the modbus connection."""
 
         errors: dict[str, str] = {}
@@ -416,7 +477,7 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
 
             # Forward to either serial or socket settings.
-            if self.data[CONF_TYPE] == CONNECTION_SERIAL:
+            if self.data[CONF_TYPE] == SERIAL:
                 return self.async_show_form(
                     step_id="modbus_serial",
                     data_schema=_modbus_serial_schema(current=reconf_entry),
@@ -431,15 +492,25 @@ class RemehaConfigFlow(ConfigFlow, domain=DOMAIN):
 
         return self.async_show_form(
             step_id="reconfigure",
-            data_schema=vol.Schema(
+            data_schema=probatio.Schema(
                 {
-                    vol.Required(CONF_TYPE, default=reconf_entry.data[CONF_TYPE]): vol.In(
-                        [CONNECTION_TCP, CONNECTION_UDP, CONNECTION_RTU_OVER_TCP, CONNECTION_SERIAL]
+                    probatio.Required(CONF_TYPE, default=reconf_entry.data[CONF_TYPE]): selector(
+                        {
+                            "select": {
+                                "translation_key": "modbus_type",
+                                "options": [
+                                    TCP,
+                                    UDP,
+                                    RTUOVERTCP,
+                                    SERIAL,
+                                ],
+                            }
+                        }
                     ),
-                    vol.Required(
+                    probatio.Required(
                         MODBUS_DEVICE_ADDRESS, default=reconf_entry.data[MODBUS_DEVICE_ADDRESS]
                     ): cv.positive_int,
-                    vol.Required(
+                    probatio.Required(
                         CONFIG_AUTO_SCHEDULE, default=reconf_entry.data[CONFIG_AUTO_SCHEDULE]
                     ): cv.boolean,
                 }

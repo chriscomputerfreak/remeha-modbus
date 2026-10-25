@@ -1,11 +1,15 @@
-required-version = ">=0.11.0"
-target-version = "py313"
+required-version = ">=0.15.1"
+target-version = "py314"
 line-length = 100
 
 [format]
 preview = false
 
 [lint]
+per-file-ignores = {
+  "tests/test_repairs.py" = ["PLR0917"],
+  "tests/conftest.py"= ["PLR0917"]
+}
 select = [
   "A001",   # Variable {name} is shadowing a Python builtin
   "ASYNC",  # flake8-async
@@ -144,7 +148,6 @@ ignore = [
   "TRY003", # Avoid specifying long messages outside the exception class
   "TRY400", # Use `logging.exception` instead of `logging.error`
   # Ignored due to performance: https://github.com/charliermarsh/ruff/issues/2923
-  "UP038", # Use `X | Y` in `isinstance` call instead of `(X, Y)`
 
   # May conflict with the formatter, https://docs.astral.sh/ruff/formatter/#conflicting-lint-rules
   "W191",

@@ -5,11 +5,13 @@
         "state_attributes": {
           "preset_mode": {
             "state": {
-              "schedule_1": "mdi:calendar-month-outline",
-              "schedule_2": "mdi:calendar-month-outline",
-              "schedule_3": "mdi:calendar-month-outline",
+              "schedule_1": "mdi:sun-thermometer-outline",
+              "schedule_2": "mdi:sun-thermometer-outline",
+              "schedule_3": "mdi:sun-thermometer-outline",
+              "schedule_4": "mdi:snowflake-thermometer",
               "manual": "mdi:gesture-tap",
-              "anti_frost": "mdi:snowflake-melt"
+              "anti_frost": "mdi:snowflake-melt",
+              "none": "mdi:thermometer-off"
             }
           }
         }
@@ -31,9 +33,17 @@
       "dhw_active": { "default": "mdi:water-boiler-auto" },
       "ch_active": { "default": "mdi:heating-coil" },
       "cooling_active": { "default": "mdi:coolant-temperature" }
+    },
+    "time": {
+      "silent_mode_start_time": { "default": "mdi:timer-play-outline" },
+      "silent_mode_end_time": { "default": "mdi:timer-off-outline" }
     }
   },
   "services": {
-    "dhw_auto_schedule": { "service": "mdi:auto-mode" }
+    "bootstrap_blenders": { "service": "mdi:ray-start-arrow" },
+    "create_default_zone_schema": { "service": "mdi:calendar-import" },
+    "dhw_auto_schedule": { "service": "mdi:auto-mode" },
+    "force_system_rediscovery": { "service": "mdi:autorenew" },
+    "read_registers": { "service": "mdi:memory" }
   }
 }

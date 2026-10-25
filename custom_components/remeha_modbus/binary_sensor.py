@@ -2,19 +2,38 @@
 
 import logging
 from collections.abc import Callable
+from enum import IntFlag
+from functools import cached_property
+from typing import cast
 
-from homeassistant.components.binary_sensor import BinarySensorDeviceClass, BinarySensorEntity
+from aio_remeha_modbus.gtw08.main_control_monitoring import ApplianceDemandStatus, MonitoringStatus
+from aio_remeha_modbus.gtw08.system_discovery_table import DeviceBoard
+from homeassistant.components.binary_sensor import BinarySensorEntity
+from homeassistant.components.binary_sensor.const import BinarySensorDeviceClass
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.remeha_modbus.api import DeviceInstance
 from custom_components.remeha_modbus.const import DOMAIN
 from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
 
 _LOGGER = logging.getLogger(__name__)
+
+
+def _state_fn(
+    current_state_fn: Callable[[], IntFlag | None], state: IntFlag
+) -> Callable[[], bool | None]:
+
+    def _has_state() -> bool | None:
+        current_state = current_state_fn()
+        if isinstance(current_state, IntFlag):
+            return current_state & state == state
+
+        return False
+
+    return _has_state
 
 
 async def async_setup_entry(
@@ -23,123 +42,43 @@ async def async_setup_entry(
     """Create the sensor entities based on the given config entry."""
 
     coordinator: RemehaUpdateCoordinator = entry.runtime_data["coordinator"]
-    mainboards: list[DeviceInstance] = coordinator.get_devices(
+    mainboards: list[DeviceBoard] = coordinator.get_devices(
         predicate=lambda device: device.is_mainboard()
     )
-    parent_device_id: int = mainboards[0].id if mainboards else None
+    parent_device_id: int | None = mainboards[0].id if mainboards else None
 
     async_add_entities(
         [
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="flame_on",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.flame_on,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="heat_pump_on",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.heat_pump_on,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="electrical_backup_on",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.electrical_backup_on,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="electrical_backup2_on",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.electrical_backup2_on,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="dhw_electrical_backup_on",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.dhw_electrical_backup_on,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="service_required",
-                device_class=BinarySensorDeviceClass.PROBLEM,
-                state_func=lambda: coordinator.get_appliance().status.service_required,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="power_down_reset_needed",
-                device_class=BinarySensorDeviceClass.PROBLEM,
-                state_func=lambda: coordinator.get_appliance().status.power_down_reset_needed,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="water_pressure_low",
-                device_class=BinarySensorDeviceClass.PROBLEM,
-                state_func=lambda: coordinator.get_appliance().status.water_pressure_low,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="appliance_pump_on",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.appliance_pump_on,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="three_way_valve_open",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.three_way_valve_open,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="three_way_valve",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.three_way_valve,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="three_way_valve_closed",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.three_way_valve_closed,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="dhw_active",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.dhw_active,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="ch_active",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.ch_active,
-            ),
-            RemehaBinarySensorEntity(
-                coordinator=coordinator,
-                parent_device_id=parent_device_id,
-                name="cooling_active",
-                device_class=None,
-                state_func=lambda: coordinator.get_appliance().status.cooling_active,
-            ),
+            *[
+                RemehaBinarySensorEntity(
+                    coordinator=coordinator,
+                    parent_device_id=parent_device_id,
+                    name=cast(str, demand_status.name).lower(),
+                    device_class=None,
+                    state_func=_state_fn(
+                        lambda: coordinator.get_main_control_monitoring().demand_status,
+                        demand_status,
+                    ),
+                )
+                for demand_status in ApplianceDemandStatus
+            ],
+            *[
+                RemehaBinarySensorEntity(
+                    coordinator=coordinator,
+                    parent_device_id=parent_device_id,
+                    name=cast(str, status.name).lower(),
+                    device_class=None,
+                    state_func=_state_fn(
+                        lambda: coordinator.get_main_control_monitoring().monitoring_status, status
+                    ),
+                )
+                for status in MonitoringStatus
+            ],
         ]
     )
 
 
-class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
+class RemehaBinarySensorEntity(CoordinatorEntity[RemehaUpdateCoordinator], BinarySensorEntity):
     """Binary sensor entity to describe the different appliance status fields in the Remeha Modbus integration."""
 
     _attr_has_entity_name = True
@@ -150,7 +89,7 @@ class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
         coordinator: RemehaUpdateCoordinator,
         parent_device_id: int | None,
         name: str,
-        device_class: BinarySensorDeviceClass,
+        device_class: BinarySensorDeviceClass | None,
         state_func: Callable[[], bool | None],
     ):
         """Create a new binary sensor entity."""
@@ -159,19 +98,23 @@ class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
 
         if parent_device_id is None:
             _LOGGER.warning("Binary sensor [%s] not linked to a parent device.", name)
-        else:
-            self._parent_device_id = parent_device_id
+
+        self._parent_device_id = parent_device_id
 
         self._attr_name = name
         self._attr_unique_id = name
         self._attr_device_class = device_class
         self._state_func: Callable[[], bool | None] = state_func
 
-    @property
+    @callback
+    def _handle_coordinator_update(self) -> None:
+        return super()._handle_coordinator_update()
+
+    @cached_property
     def translation_key(self) -> str:
         """The translation key."""
 
-        return self.name
+        return cast(str, self.name)
 
     @property
     def is_on(self) -> bool | None:
@@ -184,7 +127,7 @@ class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
 
         return self._state_func()
 
-    @property
+    @cached_property
     def device_info(self) -> DeviceInfo | None:
         """Return information about the device this sensor belongs to.
 
@@ -196,15 +139,17 @@ class RemehaBinarySensorEntity(CoordinatorEntity, BinarySensorEntity):
         if self._parent_device_id is None:
             return None
 
-        device_instance: DeviceInstance = self.coordinator.get_device(id=self._parent_device_id)
+        device_instance: DeviceBoard | None = self.coordinator.get_device(id=self._parent_device_id)
         return (
             DeviceInfo(
-                identifiers={(DOMAIN, device_instance.article_number)},
-                hw_version=f"HW{device_instance.hw_version[0]:02d}.{device_instance.hw_version[1]:02d}",
+                identifiers={(DOMAIN, str(device_instance.article_number))},
+                hw_version=f"HW{device_instance.hardware_version[0]:02d}.{device_instance.hardware_version[1]:02d}",
                 manufacturer="Remeha",
                 model=str(device_instance.board_category),
-                sw_version=f"SW{device_instance.sw_version[0]:02d}.{device_instance.sw_version[1]:02d}",
+                sw_version=f"SW{device_instance.software_version[0]:02d}.{device_instance.software_version[1]:02d}",
             )
             if device_instance is not None
+            and device_instance.hardware_version is not None
+            and device_instance.software_version is not None
             else None
         )

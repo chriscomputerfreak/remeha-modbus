@@ -1,23 +1,29 @@
 """Platform for sensor entities in the Remeha Modbus integration."""
 
 import logging
-from typing import cast
+from collections.abc import Callable
+from functools import cached_property
+from typing import cast, override
 
+from aio_remeha_modbus.gtw08.climate_zone import ClimateZone
+from aio_remeha_modbus.gtw08.system_discovery_table import DeviceBoard, DeviceBoardType
 from homeassistant.components.sensor import (
+    SensorDeviceClass,
     SensorEntity,
     SensorEntityDescription,
+    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
+from homeassistant.const import UnitOfTemperature
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from custom_components.remeha_modbus.api import DeviceInstance
 from custom_components.remeha_modbus.const import (
     DOMAIN,
+    REMEHA_ENUM_SENSOR_OPTIONS,
     REMEHA_SENSORS,
-    ModbusVariableDescription,
 )
 from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
 
@@ -30,22 +36,49 @@ async def async_setup_entry(
     """Create the sensor entities based on the given config entry."""
 
     coordinator: RemehaUpdateCoordinator = entry.runtime_data["coordinator"]
-    mainboards: list[DeviceInstance] = coordinator.get_devices(lambda device: device.is_mainboard())
+    mainboards: list[DeviceBoard] = coordinator.get_devices(lambda device: device.is_mainboard())
+    mainboard = mainboards[0] if mainboards else None
 
-    async_add_entities(
-        [
-            RemehaSensorEntity(
+    entities = [
+        RemehaSensorEntity(
+            coordinator=coordinator,
+            parent_device_id=mainboard.id if mainboard else None,
+            description=sensor_description,
+        )
+        for sensor_description in REMEHA_SENSORS
+    ]
+
+    if (
+        mainboard
+        and mainboard.board_category
+        and mainboard.board_category.type is DeviceBoardType.CU_HW
+    ):
+
+        def _get_dhw_zone(coordinator: RemehaUpdateCoordinator) -> ClimateZone:
+            zones = coordinator.get_climates(lambda z: z.is_domestic_hot_water())
+
+            assert len(zones) > 0
+            return zones[0]
+
+        entities += [
+            RemehaTemperatureSensorEntity(
+                "dhw_tank_temperature_top",
                 coordinator=coordinator,
-                parent_device_id=mainboards[0].id if mainboards else None,
-                description=sensor_description,
-                variable=modbus_description,
-            )
-            for modbus_description, sensor_description in REMEHA_SENSORS.items()
+                parent_device_id=mainboard.id,
+                native_value_func=lambda c: _get_dhw_zone(c).dhw_tank_temperature_top,
+            ),
+            RemehaTemperatureSensorEntity(
+                "dhw_tank_temperature_bottom",
+                coordinator=coordinator,
+                parent_device_id=mainboard.id,
+                native_value_func=lambda c: _get_dhw_zone(c).current_temparature,
+            ),
         ]
-    )
+
+    async_add_entities(entities)
 
 
-class RemehaSensorEntity(CoordinatorEntity, SensorEntity):
+class RemehaSensorEntity(CoordinatorEntity[RemehaUpdateCoordinator], SensorEntity):
     """Entity class to represent the different sensors of a Remeha appliance.
 
     All sensors that do not have a `owning_device` are linked to the first discovered device.
@@ -60,33 +93,48 @@ class RemehaSensorEntity(CoordinatorEntity, SensorEntity):
         coordinator: RemehaUpdateCoordinator,
         parent_device_id: int | None,
         description: SensorEntityDescription,
-        variable: ModbusVariableDescription,
     ):
         """Create a new sensor entity."""
 
         super().__init__(coordinator=coordinator)
 
-        if parent_device_id is None:
-            _LOGGER.warning("Sensor [%s] not attached to a parent device.", variable.name)
-        else:
-            self._parent_device_id = parent_device_id
+        if not isinstance(description.name, str):
+            raise TypeError(
+                f"The sensor name must be a string, got {type(description.name).__qualname__}"
+            )
 
-        self._variable = variable
+        if parent_device_id is None:
+            _LOGGER.warning("Sensor [%s] not attached to a parent device.", description.name)
+
+        self._parent_device_id = parent_device_id
         self._attr_name = description.name
-        self._attr_unique_id = description.name
+        self._attr_unique_id = str(description.name)
         self._attr_device_class = description.device_class
         self._attr_native_unit_of_measurement = description.native_unit_of_measurement
         self._attr_state_class = description.state_class
+        self._attr_options = description.options
+
+        # ENUM sensors use their own translation key so their state values can be translated.
+        if description.translation_key is not None:
+            self._attr_translation_key = description.translation_key
 
     @property
     def native_value(self):
         """Return the value of this sensor."""
 
-        return cast(RemehaUpdateCoordinator, self.coordinator).get_sensor_value(
-            variable=self._variable
-        )
+        value = self.coordinator.get_sensor_value(cast(str, self._attr_name))
 
-    @property
+        if value is None:
+            return None
+
+        # For ENUM sensors, map the raw register value to a (translatable) option key.
+        options = REMEHA_ENUM_SENSOR_OPTIONS.get(cast(str, self._attr_name))
+        if options is not None:
+            return options.get(int(value))
+
+        return value
+
+    @cached_property
     def device_info(self) -> DeviceInfo | None:
         """Return information about the device this sensor belongs to.
 
@@ -98,11 +146,50 @@ class RemehaSensorEntity(CoordinatorEntity, SensorEntity):
         if self._parent_device_id is None:
             return None
 
-        device_instance: DeviceInstance = self.coordinator.get_device(id=self._parent_device_id)
-        return DeviceInfo(
-            identifiers={(DOMAIN, device_instance.article_number)},
-            hw_version=f"HW{device_instance.hw_version[0]:02d}.{device_instance.hw_version[1]:02d}",
-            manufacturer="Remeha",
-            model=str(device_instance.board_category),
-            sw_version=f"SW{device_instance.sw_version[0]:02d}.{device_instance.sw_version[1]:02d}",
+        device_instance: DeviceBoard | None = self.coordinator.get_device(id=self._parent_device_id)
+        return (
+            DeviceInfo(
+                identifiers={(DOMAIN, str(device_instance.article_number))},
+                hw_version=f"HW{device_instance.hardware_version[0]:02d}.{device_instance.hardware_version[1]:02d}",
+                manufacturer="Remeha",
+                model=str(device_instance.board_category),
+                sw_version=f"SW{device_instance.software_version[0]:02d}.{device_instance.software_version[1]:02d}",
+            )
+            if device_instance is not None
+            and device_instance.hardware_version is not None
+            and device_instance.software_version is not None
+            else None
         )
+
+
+class RemehaTemperatureSensorEntity(RemehaSensorEntity):
+    """Entity class to represent a temperature sensor."""
+
+    def __init__(
+        self,
+        name: str,
+        coordinator: RemehaUpdateCoordinator,
+        parent_device_id: int | None,
+        native_value_func: Callable[[RemehaUpdateCoordinator], float | None],
+    ):
+        """Create a new temperature sensor entity."""
+
+        description = SensorEntityDescription(
+            key=name,
+            name=name,
+            native_unit_of_measurement=UnitOfTemperature.CELSIUS,
+            device_class=SensorDeviceClass.TEMPERATURE,
+            state_class=SensorStateClass.MEASUREMENT,
+            translation_key=name,
+        )
+
+        super().__init__(
+            coordinator=coordinator, parent_device_id=parent_device_id, description=description
+        )
+
+        self._native_value_func = native_value_func
+
+    @property
+    @override
+    def native_value(self):
+        return self._native_value_func(self.coordinator)
