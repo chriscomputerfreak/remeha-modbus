@@ -1,6 +1,7 @@
 """Platform for number entities in the Remeha Modbus integration."""
 
 import logging
+from dataclasses import dataclass
 from functools import cached_property
 from typing import cast
 
@@ -57,7 +58,53 @@ async def async_setup_entry(
     else:
         _LOGGER.debug("No DHW climates found so not adding any DhwHysteresis entities.")
 
+    entities.extend(
+        RemehaHeatingCurveNumber(coordinator=coordinator, zone=climate, description=description)
+        for climate in coordinator.get_climates(lambda c: c.is_central_heating())
+        for description in HEATING_CURVE_NUMBERS
+    )
+
     async_add_entities(entities)
+
+
+@dataclass(frozen=True, kw_only=True)
+class HeatingCurveNumberDescription:
+    """Describes a heating curve parameter of a central heating zone."""
+
+    field: str
+    """The name of the `ClimateZone` field."""
+
+    min_value: float
+    max_value: float
+    step: float
+    unit: str | None = None
+    device_class: NumberDeviceClass | None = None
+
+
+HEATING_CURVE_NUMBERS: tuple[HeatingCurveNumberDescription, ...] = (
+    # CP230: slope of the heating curve.
+    HeatingCurveNumberDescription(
+        field="heating_curve_slope", min_value=0.0, max_value=4.0, step=0.1
+    ),
+    # CP210: curve base temperature in comfort mode, 15 °C means off.
+    HeatingCurveNumberDescription(
+        field="heating_curve_base_comfort",
+        min_value=15.0,
+        max_value=90.0,
+        step=TEMPERATURE_STEP,
+        unit="°C",
+        device_class=NumberDeviceClass.TEMPERATURE,
+    ),
+    # CP220: curve base temperature in reduced mode, 15 °C means off.
+    HeatingCurveNumberDescription(
+        field="heating_curve_base_reduced",
+        min_value=15.0,
+        max_value=90.0,
+        step=TEMPERATURE_STEP,
+        unit="°C",
+        device_class=NumberDeviceClass.TEMPERATURE,
+    ),
+)
 
 
 class DhwHysteresisEntity(CoordinatorEntity[RemehaUpdateCoordinator], NumberEntity):
@@ -255,6 +302,82 @@ class RemehaNeutralBandNumber(CoordinatorEntity[RemehaUpdateCoordinator], Number
             return None
 
         device_instance: DeviceBoard | None = self.coordinator.get_device(id=self._parent_device_id)
+        return (
+            DeviceInfo(
+                identifiers={(DOMAIN, str(device_instance.article_number))},
+                hw_version=f"HW{device_instance.hardware_version[0]:02d}.{device_instance.hardware_version[1]:02d}",
+                manufacturer="Remeha",
+                model=str(device_instance.board_category),
+                sw_version=f"SW{device_instance.software_version[0]:02d}.{device_instance.software_version[1]:02d}",
+            )
+            if device_instance is not None
+            and device_instance.hardware_version is not None
+            and device_instance.software_version is not None
+            else None
+        )
+
+
+class RemehaHeatingCurveNumber(CoordinatorEntity[RemehaUpdateCoordinator], NumberEntity):
+    """Number entity for a heating curve parameter of a central heating zone."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _attr_translation_key = DOMAIN
+
+    def __init__(
+        self,
+        coordinator: RemehaUpdateCoordinator,
+        zone: ClimateZone,
+        description: HeatingCurveNumberDescription,
+    ):
+        """Create a new heating curve entity."""
+
+        super().__init__(coordinator)
+
+        self._climate_zone_id = zone.id
+        self._field = description.field
+        self._attr_unique_id = f"{description.field}_{zone.id}"
+        zone_name = (zone.short_name or f"zone_{zone.id}").lower()
+        self._attr_name = f"{zone_name}_{description.field}"
+        self._attr_native_min_value = description.min_value
+        self._attr_native_max_value = description.max_value
+        self._attr_native_step = description.step
+        self._attr_native_unit_of_measurement = description.unit
+        self._attr_device_class = description.device_class
+
+    @property
+    def _zone(self) -> ClimateZone:
+        """Return the modbus climate zone."""
+        return self.coordinator.data["climates"][self._climate_zone_id]
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current value of the heating curve parameter."""
+
+        return getattr(self._zone, self._field)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the heating curve parameter."""
+
+        await self._zone.write(self._field, value)
+
+        # The zone retains the written value until the next update.
+        self.async_write_ha_state()
+
+    @cached_property
+    def device_info(self) -> DeviceInfo | None:
+        """Return information about the device this instance belongs to.
+
+        Returns
+            `DeviceInfo | None`: The device info, or `None` if this instance is not owned by any device.
+
+        """
+        zone: ClimateZone = self._zone
+
+        if zone.owning_device is None:
+            return None
+
+        device_instance: DeviceBoard | None = self.coordinator.get_device(id=zone.owning_device)
         return (
             DeviceInfo(
                 identifiers={(DOMAIN, str(device_instance.article_number))},
