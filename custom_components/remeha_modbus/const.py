@@ -39,6 +39,12 @@ STORAGE_RUNTIME_KEY = f"{DOMAIN}_storage"
 # Configuration fields not provided by libs
 CONF_FRAMER = "framer"
 
+MODBUS_REQUEST_TIMEOUT: Final[float] = 2.0
+"""Seconds to wait for a modbus response.
+
+Serial-to-TCP bridges occasionally need more than 0.5 seconds to relay a reply.
+"""
+
 type EntityEventCallback = Callable[[Event[EventStateChangedData]], None]
 
 SWITCH_SCHEDULE_SYNC: Final[str] = "enable_schedule_sync"

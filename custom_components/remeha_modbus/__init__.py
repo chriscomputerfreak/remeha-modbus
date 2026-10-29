@@ -26,6 +26,7 @@ from custom_components.remeha_modbus.const import (
     CONFIG_AUTO_SCHEDULE,
     DOMAIN,
     ISSUE_CONFIG_ENTRY_KEY_ERROR,
+    MODBUS_REQUEST_TIMEOUT,
     REMEHA_PRESET_SCHEDULE_1,
     SERVICE_BOOTSTRAP_BLENDERS,
 )
@@ -75,7 +76,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         name=modbus_hub_name,
         unit=RetryingModbusUnit(unit),
         time_zone=await hass.async_add_executor_job(tz.gettz, hass.config.time_zone),
-        request_timeout=0.5,
+        request_timeout=MODBUS_REQUEST_TIMEOUT,
     )
 
     # Setup the coordinator
