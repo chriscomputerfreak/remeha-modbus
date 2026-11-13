@@ -168,6 +168,15 @@
       "dhw_hysteresis": {
         "name": "SWW hysterese"
       },
+      "heating_curve_base_comfort": {
+        "name": "{zone} stooklijn voetpunt comfort"
+      },
+      "heating_curve_base_reduced": {
+        "name": "{zone} stooklijn voetpunt verlaagd"
+      },
+      "heating_curve_slope": {
+        "name": "{zone} stooklijn helling"
+      },
       "max_dhw_production_time": {
         "name": "Maximale duur SWW productie"
       },

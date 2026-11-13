@@ -169,6 +169,15 @@
       "dhw_hysteresis": {
         "name": "DHW hysteresis"
       },
+      "heating_curve_base_comfort": {
+        "name": "{zone} heating curve base comfort"
+      },
+      "heating_curve_base_reduced": {
+        "name": "{zone} heating curve base reduced"
+      },
+      "heating_curve_slope": {
+        "name": "{zone} heating curve slope"
+      },
       "max_dhw_production_time": {
         "name": "Maximum DHW production duration"
       },

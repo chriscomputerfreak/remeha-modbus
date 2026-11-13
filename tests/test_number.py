@@ -3,6 +3,7 @@
 from unittest.mock import patch
 
 import pytest
+from aio_remeha_modbus.gtw08 import GTW08
 from homeassistant.components.number import NumberDeviceClass
 from homeassistant.components.number.const import ATTR_MAX, ATTR_MIN, ATTR_STEP
 from homeassistant.components.number.const import DOMAIN as NumberDomain
@@ -10,8 +11,11 @@ from homeassistant.const import ATTR_DEVICE_CLASS, ATTR_UNIT_OF_MEASUREMENT, Uni
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ServiceValidationError
 from homeassistant.helpers import entity_registry as er
+from modbus_connection.mock import MockModbusUnit
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.remeha_modbus.const import DOMAIN
+from custom_components.remeha_modbus.coordinator import RemehaUpdateCoordinator
 
 from .conftest import setup_platform
 from .util import get_entity_id
@@ -30,8 +34,9 @@ async def test_climates(hass: HomeAssistant, remeha_api, mock_config_entry, reme
         await hass.async_block_till_done()
 
         # DhwHysteresisEntity + RemehaSummerWinterNumber + RemehaNeutralBandNumber
-        # + RemehaBivalentTemperature + RemehaCompressorMinTemperature.
-        assert len(hass.states.async_all(domain_filter="number")) == 8
+        # + RemehaBivalentTemperature + RemehaCompressorMinTemperature
+        # + 3 RemehaHeatingCurveNumber entities for the single central heating zone.
+        assert len(hass.states.async_all(domain_filter="number")) == 11
 
 
 async def test_dhw_hysteresis(
@@ -359,3 +364,58 @@ async def test_dhw_hysteresis_unavailable(
 
         hysteresis = hass.states.get("number.remeha_modbus_test_hub_dhw_hysteresis")
         assert hysteresis is None
+
+
+@pytest.mark.parametrize(
+    ("field", "initial", "new_value"),
+    [
+        pytest.param("heating_curve_slope", 0.5, 1.2, id="slope_CP230"),
+        pytest.param("heating_curve_base_comfort", 20.0, 22.5, id="base_comfort_CP210"),
+        pytest.param("heating_curve_base_reduced", 17.0, 15.0, id="base_reduced_CP220"),
+    ],
+)
+async def test_heating_curve(
+    *,
+    hass: HomeAssistant,
+    remeha_api: GTW08,
+    mock_config_entry: MockConfigEntry,
+    remeha_modbus_unit: MockModbusUnit,
+    field: str,
+    initial: float,
+    new_value: float,
+):
+    """Test the heating curve number entities of a central heating zone."""
+
+    with patch(
+        "aio_remeha_modbus.gtw08.GTW08",
+        new=lambda *args, **kwargs: remeha_api,
+    ):
+        await setup_platform(
+            hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+        )
+        await hass.async_block_till_done()
+
+        entity_id = f"number.remeha_modbus_test_hub_circa1_{field}"
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert float(state.state) == initial
+
+        await hass.services.async_call(
+            domain=NumberDomain,
+            service="set_value",
+            service_data={"entity_id": entity_id, "value": new_value},
+            blocking=True,
+        )
+
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert float(state.state) == new_value
+
+        # Re-read the appliance to verify that the value was actually written to the register.
+        coordinator: RemehaUpdateCoordinator = mock_config_entry.runtime_data["coordinator"]
+        await coordinator.async_refresh()
+        await hass.async_block_till_done()
+
+        state = hass.states.get(entity_id)
+        assert state is not None
+        assert float(state.state) == new_value

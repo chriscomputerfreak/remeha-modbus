@@ -55,6 +55,12 @@ async def async_setup_entry(
     else:
         _LOGGER.debug("No DHW zones found, skipping Number entities belonging to a DHW zone.")
 
+    entities += [
+        entity_type(api, coordinator, climate.id)
+        for climate in coordinator.get_climates(lambda c: c.is_central_heating())
+        for entity_type in (HeatingCurveSlope, HeatingCurveBaseComfort, HeatingCurveBaseReduced)
+    ]
+
     async_add_entities(entities)
 
 
@@ -448,3 +454,63 @@ class RemehaNeutralBandNumber(RemehaApplianceNumberEntity):
 
         await self.coordinator.get_appliance().async_set_neutral_band_summer_winter(value)
         self.async_write_ha_state()
+
+
+class RemehaHeatingCurveNumber(RemehaZonedNumberEntity):
+    """Base class for the heating curve settings of a central heating zone."""
+
+    _attr_has_entity_name = True
+    _attr_should_poll = False
+    _field: str
+
+    def __init__(self, api: GTW08, coordinator: RemehaUpdateCoordinator, zone_id: int):
+        """Create a new heating curve entity."""
+
+        super().__init__(api, coordinator, zone_id)
+
+        self._attr_unique_id = f"zone_{zone_id}_{self._field}"
+        self._attr_translation_key = self._field
+        self._attr_translation_placeholders = {"zone": self._zone.short_name or f"Zone {zone_id}"}
+
+    @property
+    def native_value(self) -> float | None:
+        """Return the current value."""
+
+        return getattr(self._zone, self._field)
+
+    async def async_set_native_value(self, value: float) -> None:
+        """Update the current value."""
+
+        await self._zone.write(self._field, value)
+        self.async_write_ha_state()
+
+
+class HeatingCurveSlope(RemehaHeatingCurveNumber):
+    """Slope of the heating curve (parameter CP230)."""
+
+    _field = "heating_curve_slope"
+    _attr_native_min_value = 0.0
+    _attr_native_max_value = 4.0
+    _attr_native_step = 0.1
+
+
+class HeatingCurveBaseComfort(RemehaHeatingCurveNumber):
+    """Base temperature of the heating curve in comfort mode (parameter CP210). 15 °C means off."""
+
+    _field = "heating_curve_base_comfort"
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
+    _attr_native_min_value = 15.0
+    _attr_native_max_value = 90.0
+    _attr_native_step = TEMPERATURE_STEP
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
+
+
+class HeatingCurveBaseReduced(RemehaHeatingCurveNumber):
+    """Base temperature of the heating curve in reduced mode (parameter CP220). 15 °C means off."""
+
+    _field = "heating_curve_base_reduced"
+    _attr_device_class = NumberDeviceClass.TEMPERATURE
+    _attr_native_min_value = 15.0
+    _attr_native_max_value = 90.0
+    _attr_native_step = TEMPERATURE_STEP
+    _attr_native_unit_of_measurement = UnitOfTemperature.CELSIUS
