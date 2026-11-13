@@ -48,7 +48,8 @@ async def async_setup_entry(
         for sensor_description in REMEHA_SENSORS
     ]
 
-    if mainboard:
+    has_dhw_zone = len(coordinator.get_climates(lambda z: z.is_domestic_hot_water())) > 0
+    if mainboard and has_dhw_zone:
 
         def _get_dhw_zone(coordinator: RemehaUpdateCoordinator) -> ClimateZone:
             zones = coordinator.get_climates(lambda z: z.is_domestic_hot_water())

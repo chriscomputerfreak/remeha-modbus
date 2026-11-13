@@ -154,3 +154,27 @@ async def test_buffer_tank_sensors(
         top = hass.states.get("sensor.remeha_modbus_test_hub_buffer_temperature_top")
         assert top is not None
         assert top.state == STATE_UNKNOWN
+
+
+@pytest.mark.parametrize("remeha_modbus_unit", ["modbus_store_no_dhw_climate.json"], indirect=True)
+async def test_tank_temperature_sensors_without_dhw_zone(
+    hass: HomeAssistant, remeha_api, mock_config_entry, remeha_modbus_unit, caplog
+):
+    """Test that no tank temperature sensors are created if the appliance has no DHW zone."""
+
+    with patch(
+        "aio_remeha_modbus.gtw08.GTW08",
+        new=lambda *args, **kwargs: remeha_api,
+    ):
+        await setup_platform(
+            hass=hass, config_entry=mock_config_entry, remeha_modbus_unit=remeha_modbus_unit
+        )
+        await hass.async_block_till_done()
+
+        entity_registry = er.async_get(hass)
+        for unique_id in ("dhw_tank_temperature_top", "dhw_tank_temperature_bottom"):
+            assert entity_registry.async_get_entity_id(SensorDomain, DOMAIN, unique_id) is None
+
+        assert hass.states.get(TANK_TEMPERATURE_TOP) is None
+        assert hass.states.get(TANK_TEMPERATURE_BOTTOM) is None
+        assert "Error adding entity" not in caplog.text
