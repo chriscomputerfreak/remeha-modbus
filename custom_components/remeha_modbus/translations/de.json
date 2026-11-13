@@ -169,6 +169,15 @@
       "dhw_hysteresis": {
         "name": "TWW-Hysterese"
       },
+      "heating_curve_base_comfort": {
+        "name": "{zone} Heizkurve Fußpunkt Komfort"
+      },
+      "heating_curve_base_reduced": {
+        "name": "{zone} Heizkurve Fußpunkt Reduziert"
+      },
+      "heating_curve_slope": {
+        "name": "{zone} Heizkurve Steilheit"
+      },
       "max_dhw_production_time": {
         "name": "Maximale Dauer der TWW-Bereitung"
       },
